@@ -12,9 +12,10 @@
         {% set card = board_data[task.id] %}
         <article class="board-card{% if clock.overdue %} task-card-overdue{% endif %}" data-task-id="{{ task.id }}" data-board-task="{{ card|tojson|forceescape }}">
           <div class="board-card-meta"><span class="task-status status-{{ task.status }}">{{ status_labels[task.status] }}</span></div>
+          {% if task.status in ('recipient_review', 'sender_acceptance') %}<p class="task-stage board-stage">{{ (task|task_progress).stage }}</p>{% endif %}
           <h4><a href="{{ url_for('tasks.task_detail',task_id=task.id) }}">{{ task.title }}</a></h4>
           <p class="board-priority priority-{{ task.priority }}"><span aria-hidden="true"></span>{{ priority_labels[task.priority] }} приоритет</p>
-          <p class="board-department">{% if current_user.role == 'admin' %}{{ task.sender_department.name }} → {{ task.recipient_department.name }}{% else %}{{ 'От:' if direction == 'received' else 'Кому:' }} {{ task.sender_department.name if direction == 'received' else task.recipient_department.name }}{% endif %}</p>
+          <p class="board-department">{% if current_user.role == 'admin' %}{{ task.sender_department.name }} → {{ task.recipient_department.name }}{% else %}{{ 'Поручение от:' if direction == 'received' else 'Поручение для:' }} {{ task.sender_department.name if direction == 'received' else task.recipient_department.name }}{% endif %}</p>
           <p class="board-assignee"><span>Исполнитель:</span> {{ task.assignee.full_name if task.assignee else 'Не назначен' }}</p>
           <div class="board-deadline">Срок: <time{% if task.due_at %} datetime="{{ task.due_at.isoformat() }}"{% endif %}>{{ task.due_at|task_datetime if task.due_at else 'неизвестен' }}</time><span class="task-clock{% if clock.overdue %} task-overdue{% endif %}">{{ clock.text }}</span></div>
           {% if attention[task.id] %}<p class="board-attention">{{ attention[task.id] }}</p>{% endif %}

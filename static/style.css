@@ -492,3 +492,13 @@ html{scroll-padding-block:80px 24px}
 @keyframes task-dialog-enter{from{opacity:.5;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes task-backdrop-enter{from{opacity:0}to{opacity:1}}
 @keyframes task-card-confirm{0%{transform:translateY(4px);box-shadow:0 0 0 2px var(--accent)}100%{transform:translateY(0);box-shadow:0 2px 5px #60432706}}
+
+/* Task direction and result handoff explanations. */
+.task-direction-help { margin:0 0 20px; color:var(--muted); font-size:14px; line-height:1.6; max-width:94ch; }
+.task-relationship { margin:0 0 8px; font-size:13px; font-weight:700; color:var(--accent-hover); }
+.task-stage { margin:6px 0 12px; font-size:14px; line-height:1.5; color:var(--ink); }
+.board-stage { padding:8px 10px; border-radius:8px; background:var(--soft); font-size:12px; }
+.task-process { margin:16px 0 22px; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--soft); }
+.task-process-routes { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:12px; margin:12px 0 0; }
+.task-process-routes dt { color:var(--muted); font-size:12px; margin-bottom:4px; }
+.task-process-routes dd { margin:0; font-size:14px; font-weight:600; overflow-wrap:anywhere; }

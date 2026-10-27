@@ -420,8 +420,8 @@ class ApprovalWorkflowTests(PortalCase):
         task_id=self.create()
         self.app.config["WTF_CSRF_ENABLED"]=True
         page=self.client.get(f"/tasks/{task_id}").get_data(as_text=True)
-        self.assertIn("На согласование",page)
-        self.assertNotIn("Одобрить и отправить",page)
+        self.assertIn("Передать поручение на согласование начальнику",page)
+        self.assertNotIn("Одобрить и отправить поручение в другой отдел",page)
         self.assertNotIn("Взять задачу",page)
         before=self.snapshot()
         self.assertEqual(405,self.client.get(f"/tasks/{task_id}/approval/submit").status_code)

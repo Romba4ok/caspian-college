@@ -62,9 +62,9 @@ class BoardProjectionTests(PortalCase):
         self.assertEqual(set(ids), set(self.cards(response)))
         self.assert_groups(context, {
             "Черновики": ("draft",), "На согласовании": ("pending_approval",),
-            "Переданы отделу": ("awaiting_assignment", "assigned"),
-            "Выполняются": ("in_progress", "awaiting_clarification"),
-            "Проверка результата": ("recipient_review", "sender_acceptance"),
+            "Поручения отправлены": ("awaiting_assignment", "assigned"),
+            "Отдел выполняет": ("in_progress", "awaiting_clarification"),
+            "Проверка и приёмка результата": ("recipient_review", "sender_acceptance"),
         }, ids)
         self.assertEqual(set(ACTIVE), {task.status for task in context["tasks"]})
 
@@ -79,8 +79,8 @@ class BoardProjectionTests(PortalCase):
         self.assert_groups(context, {
             "К выполнению": ("awaiting_assignment", "assigned"),
             "В работе": ("in_progress",), "Уточнение": ("awaiting_clarification",),
-            "Проверка своего отдела": ("recipient_review",),
-            "Приёмка отправителя": ("sender_acceptance",),
+            "Результат: внутренняя проверка": ("recipient_review",),
+            "Результат: приёмка заказчиком": ("sender_acceptance",),
         }, ids)
 
     def test_300_tasks_in_both_directions_ignore_page_but_lists_keep_25(self):

@@ -14,15 +14,15 @@ BOARD_GROUPS = {
         ("to_do", "К выполнению", ("awaiting_assignment", "assigned")),
         ("working", "В работе", ("in_progress",)),
         ("clarification", "Уточнение", ("awaiting_clarification",)),
-        ("recipient_review", "Проверка своего отдела", ("recipient_review",)),
-        ("sender_acceptance", "Приёмка отправителя", ("sender_acceptance",)),
+        ("recipient_review", "Результат: внутренняя проверка", ("recipient_review",)),
+        ("sender_acceptance", "Результат: приёмка заказчиком", ("sender_acceptance",)),
     ),
     "sent": (
         ("drafts", "Черновики", ("draft",)),
         ("approval", "На согласовании", ("pending_approval",)),
-        ("dispatched", "Переданы отделу", ("awaiting_assignment", "assigned")),
-        ("working", "Выполняются", ("in_progress", "awaiting_clarification")),
-        ("review", "Проверка результата", ("recipient_review", "sender_acceptance")),
+        ("dispatched", "Поручения отправлены", ("awaiting_assignment", "assigned")),
+        ("working", "Отдел выполняет", ("in_progress", "awaiting_clarification")),
+        ("review", "Проверка и приёмка результата", ("recipient_review", "sender_acceptance")),
     ),
 }
 

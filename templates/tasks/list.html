@@ -26,6 +26,7 @@
 {% endif %}
 </div>
 </div>
+<p class="task-direction-help">{% if direction == 'completed' %}{{ 'Закрытые поручения всех отделов. На карточке указаны отдел-заказчик и исполняющий отдел.' if current_user.role == 'admin' else 'Закрытые поручения обоих направлений. На карточке указано, наш отдел выдавал задачу или выполнял её.' }}{% elif direction == 'received' %}{{ 'Поручения, поступившие в отделы-исполнители.' if current_user.role == 'admin' else 'Поручения, которые выполняет наш отдел.' }} Готовый результат сначала проверяет начальник исполняющего отдела, затем принимает отдел-заказчик.{% else %}{{ 'Поручения, которые отделы выдают друг другу, включая черновики.' if current_user.role == 'admin' else 'Наши поручения другим отделам, включая черновики и согласование отправки.' }} Передача готового результата на проверку — отдельный этап этого же поручения.{% endif %}</p>
 {% if view == 'board' %}
   {% include 'tasks/board.html' %}
 {% else %}
@@ -34,7 +35,10 @@
   {% set clock = deadline_states[task.id] %}
   <article class="card task-card{% if clock.overdue %} task-card-overdue{% endif %}{% if attention[task.id] %} task-card-attention{% endif %}" data-task-id="{{ task.id }}">
     <div class="task-card-main">
+      {% set progress = task|task_progress %}
+      <p class="task-relationship">{{ progress.relationship }}</p>
       <p class="task-card-meta"><span class="task-status status-{{ task.status }}">{{ status_labels[task.status] }}</span><span>{{ priority_labels[task.priority] }} приоритет</span>{% if clock.overdue %}<span class="task-overdue">Просрочена</span>{% endif %}</p>
+      <p class="task-stage">{{ progress.stage }}</p>
       {% if attention[task.id] %}<p class="task-attention">{{ attention[task.id] }}</p>{% endif %}
       <h2><a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.title }}</a></h2>
       <p class="task-card-summary">{{ task.description|truncate(190) }}</p>

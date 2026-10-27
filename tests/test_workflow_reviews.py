@@ -333,7 +333,7 @@ class ReviewWorkflowTests(PortalCase):
         self.login("employee")
         page=self.client.get(f"/tasks/{self.work}").get_data(as_text=True)
         self.assertIn("Завершена:",page)
-        self.assertIn("Отправлена:",page)
+        self.assertIn("Поручение отправлено другому отделу:",page)
         self.assertNotIn("review-actions-heading",page)
         task_id=self.new_task(status="rejected",sent_at=None,is_legacy_dispatched=True)
         page=self.client.get(f"/tasks/{task_id}").get_data(as_text=True)
@@ -344,9 +344,9 @@ class ReviewWorkflowTests(PortalCase):
     def test_post_only_csrf_and_role_specific_review_forms(self):
         self.login("receiver")
         page=self.client.get(f"/tasks/{self.work}").get_data(as_text=True)
-        self.assertIn("Передать на проверку",page)
-        self.assertNotIn("Принять и завершить",page)
-        self.assertNotIn("Передать результат отправителю",page)
+        self.assertIn("Передать результат начальнику своего отдела",page)
+        self.assertNotIn("Принять результат и завершить поручение",page)
+        self.assertNotIn("Передать готовый результат отделу-заказчику",page)
         self.app.config["WTF_CSRF_ENABLED"]=True
         before=self.snapshot()
         self.assertEqual(405,self.client.get(f"/tasks/{self.work}/review/submit_result").status_code)

@@ -49,7 +49,7 @@ class TaskPanelTests(PortalCase):
         panel=self.panel(task_id).get_data(as_text=True)
         full=self.client.get(f'/tasks/{task_id}').get_data(as_text=True)
         for text in ['Проверить весь комплект','Полное описание\nВторая строка','Контактное лицо отдела',
-            'Отчётность','Проверяем комплектность','Работа начата','Сотрудник','worker','Создана','Отправлена:']:
+            'Отчётность','Проверяем комплектность','Работа начата','Сотрудник','worker','Создана','Поручение отправлено другому отделу:']:
             self.assertIn(text,panel); self.assertIn(text,full)
         self.assertIn(f'href="/tasks/{task_id}#task-permitted-actions"',panel)
         self.assertIn('id="task-permitted-actions"',full)

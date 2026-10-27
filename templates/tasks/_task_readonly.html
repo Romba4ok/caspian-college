@@ -8,6 +8,15 @@
 {%- endmacro %}
 
 {% macro facts() -%}
+{% set progress = task|task_progress %}
+<section class="task-process" aria-label="Направление поручения и результата">
+  <p class="task-relationship">{{ progress.relationship }}</p>
+  <p class="task-stage">{{ progress.stage }}</p>
+  <dl class="task-process-routes">
+    <div><dt>Поручение</dt><dd>{{ task.sender_department.name }} → {{ task.recipient_department.name }}</dd></div>
+    <div><dt>Готовый результат</dt><dd>{{ task.recipient_department.name }} → {{ task.sender_department.name }}</dd></div>
+  </dl>
+</section>
 {% if task.status in ('draft', 'pending_approval') %}
     <p class="hint">Отдел-получатель пока не видит эту задачу. {% if task.status == 'pending_approval' %}Содержимое зафиксировано на время согласования.{% endif %}</p>
     {% endif %}
@@ -24,7 +33,7 @@
       <div><dt>{{ t('Контактное лицо') }}</dt><dd>{{ task.contact_person or t('Не указано') }}</dd></div>
     </dl>
     <p class="hint">{{ t('Создана') }} {{ task.created_at|task_datetime }}</p>
-    {% if was_sent %}<p class="hint">Отправлена: {{ task.sent_at|task_datetime if task.sent_at else 'точная дата неизвестна (историческая запись)' }}</p>{% endif %}
+    {% if was_sent %}<p class="hint">Поручение отправлено другому отделу: {{ task.sent_at|task_datetime if task.sent_at else 'точная дата неизвестна (историческая запись)' }}</p>{% endif %}
     {% if task.status == 'completed' %}<p class="hint">Завершена: {{ task.completed_at|task_datetime if task.completed_at else 'дата и время неизвестны (историческая запись)' }}</p>
     {% elif task.status in ('cancelled', 'rejected') %}<p class="hint">{{ 'Отменена' if task.status == 'cancelled' else 'Отклонена' }}: {{ task.closed_at|task_datetime if task.closed_at else 'дата и время неизвестны (историческая запись)' }}</p>{% endif %}
 {%- endmacro %}

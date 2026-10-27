@@ -33,9 +33,15 @@ from .workflow import (
 )
 from .storage import UploadBatch, UploadError, attachment_path, discard_upload, save_upload
 from .task_board import load_board_projection
+from .task_presentation import task_progress
 
 
 tasks_bp = Blueprint("tasks", __name__, url_prefix="/tasks")
+
+
+@tasks_bp.app_template_filter("task_progress")
+def describe_task_progress(task):
+    return task_progress(task, current_user)
 
 STATUS_LABELS = {
     "draft": "Черновик",
@@ -130,7 +136,7 @@ def _is_overdue(task):
 
 
 LIST_ENDPOINTS = {"received": "tasks.received_tasks", "sent": "tasks.sent_tasks", "completed": "tasks.completed_tasks"}
-LIST_LABELS = {"received": "Полученные", "sent": "Отправленные", "completed": "Завершённые"}
+LIST_LABELS = {"received": "Задачи нашему отделу", "sent": "Задачи другим отделам", "completed": "Завершённые"}
 
 
 def _visible_task_query(direction):
@@ -197,7 +203,8 @@ def _list_context(direction):
         tasks = pagination.items
     columns = [key for key in STATUS_LABELS if key not in TERMINAL and (direction != "received" or key not in PRE_DISPATCH)]
     context = dict(tasks=tasks, direction=direction, pagination=pagination,
-        list_labels=LIST_LABELS, list_endpoints=LIST_ENDPOINTS,
+        list_labels=({"received": "Полученные поручения", "sent": "Отправленные поручения", "completed": "Завершённые"}
+                     if current_user.role == "admin" else LIST_LABELS), list_endpoints=LIST_ENDPOINTS,
         view=view, board_data=board_data, board_columns=columns, board_groups=groups,
         upload_policy=_detail_upload_policy() if view == "board" else None,
         counts=counts,
@@ -453,20 +460,20 @@ def _history_entries(task):
 def _available_task_actions(task):
     """One capability list for detail forms, board buttons and drag targets."""
     definitions = (
-        ("approval", "submit", "На согласование", "pending_approval", can_submit_for_approval),
+        ("approval", "submit", "Передать поручение на согласование начальнику", "pending_approval", can_submit_for_approval),
         ("approval", "withdraw", "Отозвать в черновик", "draft", can_withdraw_approval),
         ("approval", "return_draft", "Вернуть автору в черновик", "draft", can_return_approval),
-        ("approval", "approve", "Одобрить и отправить", "awaiting_assignment", can_approve_task),
-        ("approval", "send", "Отправить", "awaiting_assignment", can_send_task),
+        ("approval", "approve", "Одобрить и отправить поручение в другой отдел", "awaiting_assignment", can_approve_task),
+        ("approval", "send", "Отправить поручение в другой отдел", "awaiting_assignment", can_send_task),
         ("execution", "assign", "Назначить исполнителя", "assigned", can_assign_task),
         ("execution", "reassign", "Переназначить исполнителя", task.status, can_reassign_task),
         ("execution", "start", "Начать работу", "in_progress", can_start_task),
         ("execution", "request_clarification", "Запросить уточнение", "awaiting_clarification", can_request_clarification),
         ("execution", "answer_clarification", "Ответить на уточнение", "in_progress", can_answer_clarification),
-        ("review", "submit_result", "Передать на проверку", "recipient_review", can_submit_result),
-        ("review", "forward_result", "Передать результат отправителю", "sender_acceptance", can_review_recipient_result),
+        ("review", "submit_result", "Передать результат начальнику своего отдела", "recipient_review", can_submit_result),
+        ("review", "forward_result", "Передать готовый результат отделу-заказчику", "sender_acceptance", can_review_recipient_result),
         ("review", "return_result", "Вернуть исполнителю на доработку", "in_progress", can_return_result),
-        ("review", "complete", "Принять и завершить", "completed", can_review_result),
+        ("review", "complete", "Принять результат и завершить поручение", "completed", can_review_result),
         ("review", "cancel", "Отменить задачу", "cancelled", can_cancel_task),
         ("review", "reject", "Отклонить задачу", "rejected", can_reject_task),
         ("review", "deadline", "Изменить срок", task.status,
