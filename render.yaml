@@ -1,0 +1,31 @@
+# Free TEST deployment. Database expires after 30 days; uploads are ephemeral.
+# Do not copy working local data to this installation.
+services:
+  - type: web
+    name: caspian-college
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements-hosting.txt
+    startCommand: sh deploy/start.sh
+    healthCheckPath: /login
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: caspian-college-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: TASK_UPLOAD_DIR
+        value: /tmp/caspian-college-uploads
+
+databases:
+  - name: caspian-college-db
+    plan: free
+    region: frankfurt
+    databaseName: caspian_college
+    user: caspian_college
