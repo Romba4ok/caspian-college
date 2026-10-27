@@ -11,5 +11,6 @@ case "$DATABASE_URL" in
 esac
 export DATABASE_URL
 
+python deploy/restore_demo_uploads.py
 python -m flask --app app:create_app db upgrade
 exec gunicorn 'app:create_app()' --bind "0.0.0.0:${PORT:-10000}" --workers 1 --threads 4 --timeout 60 --access-logfile - --error-logfile -
