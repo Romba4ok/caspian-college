@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}{{ group['title'] }} {{ t('· Проверка знаний') }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>{{ group['title'] }}</h1><p>{{ t('Студенты этой учебной группы.') }}</p></div><a href="{{ url_for('groups.teacher_groups') }}">{{ t('Все группы') }}</a></div>
+<section class="card form-card wide"><h2>{{ t('Добавить студента') }}</h2>{% if available_students %}<form method="post" action="{{ url_for('groups.teacher_group_add_member', group_id=group['id']) }}" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>{{ t('Студент') }}<select name="student_id">{% for student in available_students %}<option value="{{ student['id'] }}">{{ student['full_name'] }} · {{ student['username'] }}</option>{% endfor %}</select></label><button>{{ t('Добавить') }}</button></form>{% else %}<p>{{ t('Все созданные студенты уже добавлены в эту группу.') }}</p>{% endif %}</section>
+<section class="card table-wrap"><table><thead><tr><th>{{ t('Студент') }}</th><th>{{ t('Логин') }}</th></tr></thead><tbody>{% for student in members %}<tr><td>{{ student['full_name'] }}</td><td>{{ student['username'] }}</td></tr>{% else %}<tr><td colspan="2">{{ t('В группе пока нет студентов.') }}</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

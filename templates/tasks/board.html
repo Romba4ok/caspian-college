@@ -1,0 +1,50 @@
+<p class="sr-only" id="board-help">Перетаскивайте задачи между этапами или используйте «Действия».</p>
+<p id="board-feedback" class="task-notice" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+<button id="board-retry" type="button" hidden>Повторить обновление доски</button>
+{% include 'tasks/_board_content.html' %}
+<dialog id="board-dialog" class="board-dialog" aria-labelledby="board-dialog-title" aria-describedby="board-dialog-task">
+  <h2 id="board-dialog-title">Действие с задачей</h2>
+  <p id="board-dialog-task"></p>
+  <div id="board-error" class="message error" role="alert" tabindex="-1" hidden></div>
+  <a class="board-refresh" href="{{ url_for(list_endpoints[direction],view='board',page=pagination.page) }}" hidden>Обновить доску</a>
+  <form method="post" enctype="multipart/form-data" class="form-stack" id="board-action-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="revision" id="board-revision">
+    <label for="board-action">Действие</label><select id="board-action" required aria-describedby="board-action-help"></select>
+    <p id="board-action-help" class="hint"></p>
+    <div id="board-assignee-field" hidden><label for="board-assignee">Исполнитель <span class="hint">Один участник отдела-получателя; обязательно</span></label><select id="board-assignee" name="assignee_id" disabled></select></div>
+    <div id="board-deadline-field" hidden><label for="board-deadline">Новый срок <span class="hint">Обязательно; {{ config.TASK_TIMEZONE }}</span></label><input id="board-deadline" type="datetime-local" name="due_at" disabled></div>
+    <label for="board-comment">Комментарий <span class="hint">Обязательно</span></label><textarea id="board-comment" name="comment" rows="4" required></textarea>
+    {% if upload_policy and upload_policy.allowed_extensions %}
+    <label for="board-attachment">Файлы к комментарию <span class="hint">Необязательно</span></label><input id="board-attachment" type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
+    <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл и до 21 МБ на весь запрос. После ошибки выберите файлы повторно.</p>
+    {% endif %}
+    <p id="board-saving" role="status" aria-live="polite" aria-atomic="true" hidden>Сохраняем действие…</p>
+    <div class="actions"><button id="board-submit" type="submit">Подтвердить</button><button id="board-cancel" class="secondary-button" type="button">Отмена</button></div>
+  </form>
+  <div id="board-discard" role="group" aria-labelledby="board-discard-heading" hidden>
+    <h3 id="board-discard-heading">Несохранённый ввод</h3>
+    <p>Комментарий или файлы ещё не отправлены. Закрыть без сохранения?</p>
+    <div class="actions"><button type="button" id="board-keep">Продолжить редактирование</button><button type="button" class="secondary-button" id="board-discard-confirm">Закрыть без сохранения</button></div>
+  </div>
+</dialog>
+
+<div id="task-panel-dialog" class="task-panel-dialog" aria-labelledby="task-panel-heading" hidden>
+  <header class="task-panel-header">
+    <h2 id="task-panel-heading">Просмотр задачи</h2>
+    <button type="button" class="secondary-button" id="task-panel-close" autofocus>Закрыть</button>
+  </header>
+  <nav class="task-panel-navigation" aria-label="Просмотр задач доски">
+    <button type="button" class="secondary-button" id="task-panel-prev">Предыдущая задача</button>
+    <button type="button" class="secondary-button" id="task-panel-next">Следующая задача</button>
+  </nav>
+  <div class="task-panel-body">
+    <p id="task-panel-status" role="status" aria-live="polite" aria-atomic="true"></p>
+    <div id="task-panel-content"></div>
+    <div class="task-panel-recovery" id="task-panel-recovery" hidden>
+      <button type="button" id="task-panel-retry">Повторить загрузку</button>
+      <a id="task-panel-fallback" class="button secondary-button">Открыть полную страницу</a>
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='task-panel.js') }}" defer></script>

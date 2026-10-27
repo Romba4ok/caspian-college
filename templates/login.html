@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('Вход · Платформа отделов') }}{% endblock %}
+{% block content %}
+<section class="card login-card">
+  <h1>{{ t('Вход') }}</h1>
+  <form method="post" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>{{ t('Логин') }}<input name="username" maxlength="80" autocomplete="username" required></label>
+    <label>{{ t('Пароль') }}<input name="password" type="password" autocomplete="current-password" required></label>
+    <button>{{ t('Войти') }}</button>
+  </form>
+</section>
+{% endblock %}

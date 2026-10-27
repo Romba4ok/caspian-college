@@ -1,0 +1,34 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('Пользователи · Платформа отделов') }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>{{ t('Пользователи') }}</h1><p>{{ t('Управляйте сотрудниками и начальниками отделов.') }}</p></div><a class="button" href="{{ url_for('admin.admin_user_new') }}">{{ t('Добавить пользователя') }}</a></div>
+<section class="card table-wrap users-table">
+  <table>
+    <thead><tr><th>{{ t('Имя') }}</th><th>{{ t('Логин') }}</th><th>{{ t('Роль') }}</th><th>{{ t('Отдел') }}</th><th>{{ t('Статус') }}</th><th><span class="sr-only">{{ t("Действия") }}</span></th></tr></thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td data-label="{{ t('Имя') }}">{{ user['full_name'] }}</td>
+        <td data-label="{{ t('Логин') }}">{{ user['username'] }}</td>
+        <td data-label="{{ t('Роль') }}">{{ t(roles[user['role']]) }}</td>
+        <td data-label="{{ t('Отдел') }}">{{ t(user.department.name) if user.department else '—' }}</td>
+        <td data-label="{{ t('Статус') }}">{{ t('Заблокирована') if user['is_blocked'] else t('Активна') }}</td>
+        <td class="actions">
+          <a href="{{ url_for('admin.admin_user_edit', user_id=user['id']) }}">{{ t('Изменить') }}</a>
+          {% if user['role'] != 'admin' %}
+            <form method="post" action="{{ url_for('admin.admin_user_unblock' if user['is_blocked'] else 'admin.admin_user_block', user_id=user['id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="link-button">{{ t('Разблокировать') if user['is_blocked'] else t('Заблокировать') }}</button>
+            </form>
+            <form method="post" action="{{ url_for('admin.admin_user_delete', user_id=user['id']) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="danger link-button">{{ t('Удалить') }}</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="6">{{ t('Учётных записей пока нет.') }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

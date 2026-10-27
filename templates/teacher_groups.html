@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('Мои группы · Проверка знаний') }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>{{ t('Мои группы') }}</h1><p>{{ t('Добавляйте учебные группы и их студентов.') }}</p></div><a class="button" href="{{ url_for('groups.teacher_group_new') }}">{{ t('Создать группу') }}</a></div>
+<section class="card table-wrap"><table><thead><tr><th>{{ t('Группа') }}</th><th>{{ t('Студентов') }}</th><th></th></tr></thead><tbody>
+{% for group in groups %}<tr><td>{{ group['title'] }}</td><td>{{ group['student_count'] }}</td><td><a href="{{ url_for('groups.teacher_group_detail', group_id=group['id']) }}">{{ t('Открыть') }}</a></td></tr>
+{% else %}<tr><td colspan="3">{{ t('Групп пока нет.') }}</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

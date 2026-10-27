@@ -1,0 +1,64 @@
+{% macro notices() -%}
+{% if attention_label %}<p class="task-notice">{{ attention_label }}</p>{% endif %}
+{% if task.status in ('completed', 'cancelled', 'rejected') %}<p class="task-notice">Задача закрыта. Доступны просмотр истории и скачивание материалов.</p>{% elif current_user.role == 'admin' %}<p class="task-notice">Просмотр администратора. Действия и обсуждение доступны участникам отделов.</p>{% endif %}
+{%- endmacro %}
+
+{% macro badges() -%}
+<div class="task-detail-badges">{% if deadline_state.overdue %}<span class="task-overdue">Просрочена</span>{% endif %}<span class="task-status status-{{ task.status }}">{{ t(status_labels[task.status]) }}</span><span class="task-priority">{{ t(priority_labels[task.priority]) }} {{ t('приоритет') }}</span></div>
+{%- endmacro %}
+
+{% macro facts() -%}
+{% if task.status in ('draft', 'pending_approval') %}
+    <p class="hint">Отдел-получатель пока не видит эту задачу. {% if task.status == 'pending_approval' %}Содержимое зафиксировано на время согласования.{% endif %}</p>
+    {% endif %}
+    <h2>{{ t('Описание') }}</h2>
+    <div class="task-description">{{ task.description }}</div>
+    <dl class="task-facts">
+      <div><dt>{{ t('Автор') }}</dt><dd>{{ task.author.full_name }}</dd></div>
+      <div><dt>{{ t('Отдел-отправитель') }}</dt><dd>{{ t(task.sender_department.name) }}</dd></div>
+      <div><dt>{{ t('Отдел-получатель') }}</dt><dd>{{ t(task.recipient_department.name) }}</dd></div>
+      <div><dt>{{ t('Исполнитель') }}</dt><dd>{{ task.assignee.full_name if task.assignee else t('Пока не назначен') }}</dd></div>
+      <div><dt>{{ t('Срок (') }}{{ config.TASK_TIMEZONE }})</dt><dd>{{ task.due_at|task_datetime }}</dd></div>
+      <div><dt>Оставшееся время</dt><dd class="task-clock{% if deadline_state.overdue %} task-overdue{% endif %}">{{ deadline_state.text }}</dd></div>
+      <div><dt>{{ t('Категория') }}</dt><dd>{{ task.category or t('Не указана') }}</dd></div>
+      <div><dt>{{ t('Контактное лицо') }}</dt><dd>{{ task.contact_person or t('Не указано') }}</dd></div>
+    </dl>
+    <p class="hint">{{ t('Создана') }} {{ task.created_at|task_datetime }}</p>
+    {% if was_sent %}<p class="hint">Отправлена: {{ task.sent_at|task_datetime if task.sent_at else 'точная дата неизвестна (историческая запись)' }}</p>{% endif %}
+    {% if task.status == 'completed' %}<p class="hint">Завершена: {{ task.completed_at|task_datetime if task.completed_at else 'дата и время неизвестны (историческая запись)' }}</p>
+    {% elif task.status in ('cancelled', 'rejected') %}<p class="hint">{{ 'Отменена' if task.status == 'cancelled' else 'Отклонена' }}: {{ task.closed_at|task_datetime if task.closed_at else 'дата и время неизвестны (историческая запись)' }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro attachments() -%}
+{% if task.attachments %}<ul class="task-plain-list">{% for attachment in task.attachments %}<li><a href="{{ url_for('tasks.task_download', attachment_id=attachment.id) }}">{{ attachment.original_filename }}</a> <span class="hint">({{ (attachment.size_bytes / 1024)|round(0, 'ceil')|int }} {{ t('КБ)') }}</span></li>{% endfor %}</ul>{% else %}<p>{{ t('Вложений пока нет.') }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro comments() -%}
+{% if task.comments %}<ul class="task-comment-list">{% for comment in task.comments %}<li><strong>{{ comment.author.full_name }}</strong><time>{{ comment.created_at|task_datetime }}</time><p>{{ comment.body }}</p>{% if comment_files.get(comment.id) %}<ul class="task-plain-list" aria-label="Файлы комментария">{% for attachment in comment_files[comment.id] %}<li><a href="{{ url_for('tasks.task_download', attachment_id=attachment.id) }}">{{ attachment.original_filename }}</a></li>{% endfor %}</ul>{% endif %}</li>{% endfor %}</ul>{% else %}<p>{{ t('Обсуждение пока не началось.') }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro history() -%}
+<ol class="task-history-list">
+    {% for entry in history_entries %}
+    <li>
+      <time>{{ entry.event.created_at|task_datetime }}</time>
+      <strong>{{ entry.label }}</strong>
+      <p class="hint">{{ entry.actor }}</p>
+      {% if entry.comment %}<p>{{ entry.comment }}</p>{% endif %}
+      {% if entry.filename %}<p>{{ entry.filename }}</p>{% endif %}
+      {% if entry.changes %}<details class="task-history-changes"><summary>Значения до и после действия</summary>
+        <dl>{% for label, before, after in entry.changes %}<div><dt>{{ label }}</dt><dd><span>Было: {{ before }}</span><span>Стало: {{ after }}</span></dd></div>{% endfor %}</dl>
+      </details>{% endif %}
+    </li>
+    {% else %}<li>Событий пока нет.</li>{% endfor %}
+  </ol>
+{%- endmacro %}
+
+{% macro working_notices() -%}
+{% if task.due_at is none and task.status not in ('completed', 'cancelled', 'rejected') %}
+    <p class="hint" role="status">У исторической задачи не указан срок. Рабочие действия недоступны, пока начальник отдела-отправителя не заполнит срок.</p>
+    {% endif %}
+    {% if unavailable_assignee and task.status not in ('completed', 'cancelled', 'rejected') %}
+    <p class="hint" role="status">Исполнитель недоступен для работы. Начальнику отдела-получателя необходимо переназначить задачу.</p>
+    {% endif %}
+{%- endmacro %}

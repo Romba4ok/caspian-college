@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Уведомления · Платформа отделов{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>Уведомления</h1><p>Ваши задачи, согласования и результаты. Непрочитанных: {{ unread_notification_count }}.</p></div>
+  <a href="{{ url_for('tasks.received_tasks') }}">К задачам</a>
+</div>
+<div class="actions">
+  <form method="get" class="actions notification-filter">
+    <label><input type="checkbox" name="unread" value="1" {% if unread_only %}checked{% endif %}> Только непрочитанные</label>
+    <button type="submit">Показать</button>
+  </form>
+  <form method="post" action="{{ url_for('tasks.notification_mark_all_read') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="boundary" value="{{ read_boundary }}">
+    <button type="submit" {% if not unread_notification_count %}disabled{% endif %}>Прочитать все</button>
+  </form>
+</div>
+<p class="hint">«Прочитать все» относится к уведомлениям, доступным при открытии страницы. Более новые останутся непрочитанными.</p>
+<section class="notification-list" aria-label="Список уведомлений">
+  {% for notification in notifications %}
+  <article class="card {% if not notification.is_read %}notification-unread{% endif %}">
+    <p><strong>{{ notification_texts[notification.id] }}</strong></p>
+    <p class="hint"><time>{{ notification.created_at|task_datetime }}</time> · {{ 'Прочитано' if notification.is_read else 'Новое' }}</p>
+    <div class="actions">
+      {% if notification.task_id %}<a href="{{ url_for('tasks.task_detail', task_id=notification.task_id) }}">Открыть задачу</a>{% endif %}
+      {% if not notification.is_read %}
+      <form method="post" action="{{ url_for('tasks.notification_mark_read', notification_id=notification.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Отметить прочитанным</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+  {% else %}<div class="card"><h2>{{ 'Непрочитанных уведомлений нет' if unread_only else 'Уведомлений пока нет' }}</h2><p>Здесь появятся сообщения о доступных вам задачах.</p></div>{% endfor %}
+</section>
+<nav class="actions" aria-label="Страницы уведомлений">
+  {% if pagination.has_prev %}<a href="{{ url_for('tasks.notification_center', page=pagination.prev_num, unread='1' if unread_only else '') }}">Назад</a>{% endif %}
+  {% if pagination.pages %}<span>Страница {{ pagination.page }} из {{ pagination.pages }}</span>{% endif %}
+  {% if pagination.has_next %}<a href="{{ url_for('tasks.notification_center', page=pagination.next_num, unread='1' if unread_only else '') }}">Далее</a>{% endif %}
+</nav>
+{% endblock %}
+

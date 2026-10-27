@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Изменить пользователя' if user else 'Новый пользователь' }} · Платформа отделов{% endblock %}
+{% block content %}
+<section class="card form-card">
+  <h1>{{ 'Изменить пользователя' if user else 'Новый пользователь' }}</h1>
+  <form method="post" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Полное имя<input name="full_name" maxlength="160" value="{{ request.form.get('full_name', user.full_name if user else '') }}" required></label>
+    <label>Логин<input name="username" maxlength="80" autocomplete="off" value="{{ request.form.get('username', user.username if user else '') }}" required></label>
+    <label>Роль
+      <select name="role" required>
+        {% for value, title in roles.items() %}<option value="{{ value }}" {% if request.form.get('role', user.role if user else 'employee') == value %}selected{% endif %}>{{ title }}</option>{% endfor %}
+      </select>
+    </label>
+    {% if user and user.role == 'admin' %}
+      <p class="hint">В платформе один администратор. Его отдел и административная роль не изменяются.</p>
+      <input type="hidden" name="department_id" value="">
+    {% else %}
+      <label>Отдел
+        <select name="department_id" required>
+          <option value="">Выберите отдел</option>
+          {% for department in departments %}<option value="{{ department.id }}" {% if request.form.get('department_id', user.department_id if user and user.department_id else '')|string == department.id|string %}selected{% endif %}>{{ department.name }}{% if department.is_archived %} (архив){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+    {% endif %}
+    {% if user %}<label>Новый пароль <span class="hint">Оставьте пустым, чтобы сохранить текущий пароль.</span><input name="password" type="password" autocomplete="new-password"></label>{% else %}<label>Пароль<input name="password" type="password" autocomplete="new-password" required></label>{% endif %}
+    <div class="actions"><button>Сохранить</button><a href="{{ url_for('admin.admin_users') }}">Отмена</a></div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% macro status_comparison(incoming, outgoing, caption) %}
+<div class="report-table-wrap"><table class="report-table">
+  <caption>{{ caption }}</caption><thead><tr><th scope="col">Статус</th><th scope="col">Входящие</th><th scope="col">Исходящие</th></tr></thead>
+  <tbody>{% for key,label in status_labels.items() %}<tr><th scope="row">{{ label }}</th><td>{{ incoming.statuses[key] }}</td><td>{{ outgoing.statuses[key] }}</td></tr>{% endfor %}</tbody>
+  <tfoot><tr><th scope="row">Всего</th><td>{{ incoming.total }}</td><td>{{ outgoing.total }}</td></tr></tfoot>
+</table></div>
+{% endmacro %}
+{% block title %}Отчёт отдела · Платформа отделов{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="hint">Отчёт начальника</p><h1>{{ report.department.name }}</h1><p>Входящие — фактически поступившие поручения. Исходящие — поручения вашего отдела, включая черновики и согласование.</p></div><a href="{{ url_for('tasks.received_tasks') }}">К задачам</a></div>
+{% if report.department.archived %}<p class="task-notice">Отдел в архиве. Его прежние задачи и результаты сохранены в отчёте.</p>{% endif %}
+<p class="hint">По состоянию на {{ report.generated_at|task_datetime }} · {{ config.TASK_TIMEZONE }}</p>
+<section class="report-kpis" aria-label="Показатели отдела">
+  <div class="card report-kpi"><span>Всего задач отдела</span><strong>{{ report.overall.total }}</strong></div>
+  <div class="card report-kpi"><span>Входящие / исходящие</span><strong>{{ report.incoming.total }} / {{ report.outgoing.total }}</strong></div>
+  <div class="card report-kpi"><span>Активные просроченные</span><strong>{{ report.overall.overdue }}</strong><small>Входящие: {{ report.incoming.overdue }} · Исходящие: {{ report.outgoing.overdue }}</small></div>
+</section>
+<section class="card report-section" aria-labelledby="report-statuses"><h2 id="report-statuses">Задачи по статусам</h2>{{ status_comparison(report.incoming,report.outgoing,'Количество задач своего отдела по направлениям и статусам') }}</section>
+<section class="card report-section" aria-labelledby="report-duration"><h2 id="report-duration">Среднее время выполнения</h2>
+  <p>Календарные часы от фактической отправки до окончательной приёмки отправителем. Выходные и нерабочее время входят в длительность. Отмены, отказы и незавершённые задачи не участвуют в среднем.</p>
+  <div class="report-duration-grid">
+    {% for label, data in [('Входящие',report.incoming),('Исходящие',report.outgoing)] %}
+    <div class="report-duration"><h3>{{ label }}</h3><p class="report-average">{{ data.average_hours|report_hours }}</p><p class="hint">Учтено завершённых: {{ data.included }}. Исключено завершённых с неизвестными или некорректными датами либо неподтверждённой отправкой: {{ data.excluded }}.</p></div>
+    {% endfor %}
+  </div>
+  {% if report.overall.total == 0 %}<p class="task-notice">Задач пока нет. Показатели обновятся после появления поручений вашего отдела.</p>{% endif %}
+</section>
+{% endblock %}

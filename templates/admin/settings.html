@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Настройки файлов · Платформа отделов{% endblock %}
+{% block content %}
+<section class="card form-card">
+  <h1>Настройки файлов</h1>
+  <form method="post" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if error %}<p class="message error" id="settings-error" role="alert">{{ error }}</p>{% endif %}
+    <label for="upload-limit">Максимальный размер одного файла, МБ</label>
+    <input id="upload-limit" name="max_upload_mb" type="number" min="1" max="20" step="1" required value="{{ request.form.get('max_upload_mb', policy.max_upload_mb) }}" aria-describedby="upload-limit-hint{% if error_field == 'max_upload_mb' %} settings-error{% endif %}"{% if error_field == 'max_upload_mb' %} aria-invalid="true"{% endif %}>
+    <p class="hint" id="upload-limit-hint">От 1 до 20 МБ на файл. Общий предел одного запроса остаётся 21 МБ.</p>
+    <fieldset aria-describedby="formats-hint{% if error_field == 'allowed_extensions' %} settings-error{% endif %}">
+      <legend>Разрешённые форматы</legend>
+      {% for extension in extensions %}<label><input type="checkbox" name="allowed_extensions" value="{{ extension }}"{% if extension in selected_extensions %} checked{% endif %}>{{ extension|upper }}</label>{% endfor %}
+    </fieldset>
+    <p class="hint" id="formats-hint">Можно выбрать поднабор поддерживаемых форматов. Если снять все флажки, новые загрузки будут запрещены. Ранее сохранённые файлы не удаляются.</p>
+    <p class="hint">Политика предназначена для файлов задачи и комментариев. Проверку содержимого файла отключить нельзя.</p>
+    <button>Сохранить настройки</button>
+  </form>
+</section>
+{% endblock %}

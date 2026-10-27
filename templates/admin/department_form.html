@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Изменить отдел' if department else 'Новый отдел' }} · Платформа отделов{% endblock %}
+{% block content %}
+<section class="card form-card">
+  <h1>{{ 'Изменить отдел' if department else 'Новый отдел' }}</h1>
+  {% if department and department.is_archived %}<p class="hint">Этот отдел в архиве. Переименование не восстанавливает его автоматически.</p>{% endif %}
+  <form method="post" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="department-name">Название отдела</label>
+    <input id="department-name" name="name" maxlength="100" required value="{{ request.form.get('name', department.name if department else '') }}" aria-describedby="department-name-hint{% if error %} department-name-error{% endif %}"{% if error %} aria-invalid="true"{% endif %}>
+    <p class="hint" id="department-name-hint">От 1 до 100 символов. Регистр и пробелы по краям не создают новое название.</p>
+    {% if error %}<p class="message error" id="department-name-error" role="alert">{{ error }}</p>{% endif %}
+    <div class="actions"><button>Сохранить</button><a href="{{ url_for('admin.admin_departments') }}">Отмена</a></div>
+  </form>
+</section>
+{% endblock %}

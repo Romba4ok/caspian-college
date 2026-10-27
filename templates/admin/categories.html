@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Категории · Платформа отделов{% endblock %}
+{% block content %}
+<div class="page-heading"><div><h1>Категории</h1><p>Справочник для новых задач. Переименование и архивирование не меняют названия в отправленных поручениях.</p></div></div>
+<section class="card table-wrap users-table" aria-label="Справочник категорий">
+  <table>
+    <thead><tr><th scope="col">Название</th><th scope="col">Статус</th><th scope="col">Задачи</th><th scope="col">Действия</th></tr></thead>
+    <tbody>
+    {% for category in categories %}
+      <tr>
+        <td data-label="Название">{{ category.name }}</td>
+        <td data-label="Статус">{{ 'Архив' if category.is_archived else 'Действующая' }}</td>
+        <td data-label="Задачи">{{ task_counts.get(category.id, 0) }}</td>
+        <td class="actions">
+          <details{% if error and editing_id == category.id %} open{% endif %}>
+            <summary>Изменить</summary>
+            <form method="post" action="{{ url_for('admin.admin_category_edit', category_id=category.id) }}" class="form-stack">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label for="category-name-{{ category.id }}">Название категории</label>
+              <input id="category-name-{{ category.id }}" name="name" required maxlength="80" value="{{ request.form.get('name', '') if editing_id == category.id else category.name }}"{% if error and editing_id == category.id %} aria-invalid="true" aria-describedby="category-error-{{ category.id }}"{% endif %}>
+              {% if error and editing_id == category.id %}<p class="message error" id="category-error-{{ category.id }}" role="alert">{{ error }}</p>{% endif %}
+              <button>Сохранить название</button>
+            </form>
+          </details>
+          {% if not category.is_archived %}
+          <form method="post" action="{{ url_for('admin.admin_category_archive', category_id=category.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button">Архивировать</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="4">Категорий пока нет. Добавьте первую категорию ниже.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</section>
+<section class="card form-card" aria-labelledby="new-category-heading">
+  <h2 id="new-category-heading">Добавить категорию</h2>
+  <form method="post" action="{{ url_for('admin.admin_category_new') }}" class="form-stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="new-category-name">Название категории</label>
+    <input id="new-category-name" name="name" maxlength="80" required value="{{ request.form.get('name', '') if error and editing_id is none else '' }}" aria-describedby="category-name-hint{% if error and editing_id is none %} new-category-error{% endif %}"{% if error and editing_id is none %} aria-invalid="true"{% endif %}>
+    <p class="hint" id="category-name-hint">От 1 до 80 символов. Название должно быть уникальным, включая архив.</p>
+    {% if error and editing_id is none %}<p class="message error" id="new-category-error" role="alert">{{ error }}</p>{% endif %}
+    <button>Добавить категорию</button>
+  </form>
+</section>
+{% endblock %}

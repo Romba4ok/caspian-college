@@ -1,0 +1,31 @@
+# Python / environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+# Secrets / local runtime
+.env
+.env.*
+!.env.example
+config.json
+*.pem
+*.key
+# Databases / user content / backups
+instance/
+uploads/
+backups/
+*.sqlite*
+*.db
+*.dump
+*.backup
+*.log
+# Machine-specific operational history stays local
+LOCAL_DEVELOPMENT.md
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

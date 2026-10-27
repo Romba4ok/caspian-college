@@ -1,0 +1,3 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('Новая группа · Проверка знаний') }}{% endblock %}
+{% block content %}<section class="card form-card"><h1>{{ t('Новая группа') }}</h1><form method="post" class="form-stack"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>{{ t('Название группы') }}<input name="title" value="{{ request.form.get('title', '') }}" placeholder="{{ t('Например, 9А · Алгебра') }}" required></label><div class="actions"><button>{{ t('Создать') }}</button><a href="{{ url_for('groups.teacher_groups') }}">{{ t('Отмена') }}</a></div></form></section>{% endblock %}

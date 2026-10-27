@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% macro status_comparison(incoming, outgoing, caption) %}
+<div class="report-table-wrap"><table class="report-table">
+  <caption>{{ caption }}</caption><thead><tr><th scope="col">Статус</th><th scope="col">Входящие</th><th scope="col">Исходящие</th></tr></thead>
+  <tbody>{% for key,label in status_labels.items() %}<tr><th scope="row">{{ label }}</th><td>{{ incoming.statuses[key] }}</td><td>{{ outgoing.statuses[key] }}</td></tr>{% endfor %}</tbody>
+  <tfoot><tr><th scope="row">Всего</th><td>{{ incoming.total }}</td><td>{{ outgoing.total }}</td></tr></tfoot>
+</table></div>
+{% endmacro %}
+{% block title %}Общая статистика · Платформа отделов{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="hint">Просмотр администратора</p><h1>Общая статистика</h1><p>Каждое поручение учитывается один раз в глобальном итоге. Разрез по отделам отдельно показывает входящие и исходящие задачи.</p></div></div>
+<p class="hint">По состоянию на {{ report.generated_at|task_datetime }} · {{ config.TASK_TIMEZONE }}</p>
+<section class="report-kpis" aria-label="Общие показатели">
+  <div class="card report-kpi"><span>Всего задач</span><strong>{{ report.overall.total }}</strong><small>Без двойного счёта участвующих отделов</small></div>
+  <div class="card report-kpi"><span>Активные просроченные</span><strong>{{ report.overall.overdue }}</strong><small>Только отправленные, ещё не закрытые задачи</small></div>
+  <div class="card report-kpi"><span>Отделов</span><strong>{{ report.departments|length }}</strong><small>Включая архивные</small></div>
+</section>
+<section class="card report-section" aria-labelledby="global-statuses"><h2 id="global-statuses">Все задачи по статусам</h2>
+  <dl class="report-status-grid">{% for key,label in status_labels.items() %}<div><dt>{{ label }}</dt><dd>{{ report.overall.statuses[key] }}</dd></div>{% endfor %}</dl>
+  {% if not report.overall.total %}<p class="task-notice">Задач пока нет. Нулевые значения отражают отсутствие поручений.</p>{% endif %}
+</section>
+<section class="report-section" aria-labelledby="department-statistics"><h2 id="department-statistics">По отделам</h2><p>Входящие считаются после отправки. Исходящие включают черновики и согласование. Сумма направлений по всем отделам не является глобальным итогом.</p>
+  <div class="report-departments">
+  {% for department in report.departments %}<article class="card report-department" data-department-id="{{ department.id }}">
+    <h3>{{ department.name }}</h3>{% if department.archived %}<p class="report-archive">Архивный отдел</p>{% endif %}
+    <dl class="report-department-numbers"><div><dt>Входящие</dt><dd>{{ department.incoming.total }}</dd></div><div><dt>Исходящие</dt><dd>{{ department.outgoing.total }}</dd></div><div><dt>Просрочено входящих</dt><dd>{{ department.incoming.overdue }}</dd></div><div><dt>Просрочено исходящих</dt><dd>{{ department.outgoing.overdue }}</dd></div></dl>
+    <details><summary>Статусы по направлениям<span class="sr-only"> · {{ department.name }}</span></summary>{{ status_comparison(department.incoming,department.outgoing,'Статусы задач отдела «' ~ department.name ~ '»') }}</details>
+  </article>{% endfor %}
+  </div>
+</section>
+{% endblock %}

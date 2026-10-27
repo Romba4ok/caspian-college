@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}{{ list_labels[direction] }} · Платформа отделов{% endblock %}
+{% block main_class %}task-workspace{% if view == 'board' %} task-board-workspace{% endif %}{% endblock %}
+{% block content %}
+<div class="page-heading task-page-heading">
+  <div><p class="hint">{{ 'Все отделы · Просмотр администратора' if current_user.role == 'admin' else current_user.department.name }}</p>
+    <h1>Задачи</h1><p class="task-page-subtitle{% if view == 'board' %} sr-only{% endif %}">Поручения, согласования и результаты работы отделов.</p></div>
+  {% if may_create %}<a class="button" href="{{ url_for('tasks.task_new') }}">Новая задача</a>{% endif %}
+</div>
+{% if current_user.role != 'admin' and current_user.department.is_archived %}
+<p class="task-notice">Ваш отдел в архиве. Можно завершать ранее отправленные задачи; создание и отправка новых доступны после восстановления отдела.</p>
+{% endif %}
+<div class="task-navigation">
+<nav class="task-tabs" aria-label="Разделы задач">
+  {% for key, label in list_labels.items() %}
+  <a href="{{ url_for(list_endpoints[key]) }}" {% if direction == key %}aria-current="page"{% endif %}>{{ label }} <span class="task-tab-count" aria-label="Всего задач: {{ counts[key] }}">{{ counts[key] }}</span></a>
+  {% endfor %}
+</nav>
+<div class="task-toolbar">
+<div class="task-list-heading{% if view == 'board' %} sr-only{% endif %}"><h2>{{ list_labels[direction] }}</h2><p class="hint">Всего: {{ pagination.total }}{% if view != 'board' and pagination.pages %} · Страница {{ pagination.page }} из {{ pagination.pages }}{% endif %}</p></div>
+{% if direction != 'completed' %}
+<nav class="task-view-switch" aria-label="Вид задач" data-task-view="{{ view }}" data-user-id="{{ current_user.id }}" data-direction="{{ direction }}">
+  <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='list', page=pagination.page) }}" {% if view == 'list' %}aria-current="true"{% endif %}>Список</a>
+  <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='board') }}" {% if view == 'board' %}aria-current="true"{% endif %}>Доска</a>
+</nav>
+{% endif %}
+</div>
+</div>
+{% if view == 'board' %}
+  {% include 'tasks/board.html' %}
+{% else %}
+<section class="task-list" aria-label="Список задач">
+  {% for task in tasks %}
+  {% set clock = deadline_states[task.id] %}
+  <article class="card task-card{% if clock.overdue %} task-card-overdue{% endif %}{% if attention[task.id] %} task-card-attention{% endif %}" data-task-id="{{ task.id }}">
+    <div class="task-card-main">
+      <p class="task-card-meta"><span class="task-status status-{{ task.status }}">{{ status_labels[task.status] }}</span><span>{{ priority_labels[task.priority] }} приоритет</span>{% if clock.overdue %}<span class="task-overdue">Просрочена</span>{% endif %}</p>
+      {% if attention[task.id] %}<p class="task-attention">{{ attention[task.id] }}</p>{% endif %}
+      <h2><a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">{{ task.title }}</a></h2>
+      <p class="task-card-summary">{{ task.description|truncate(190) }}</p>
+      {% if current_user.role == 'admin' or direction == 'completed' %}<p class="hint">Отправитель: {{ task.sender_department.name }} → Получатель: {{ task.recipient_department.name }}</p>
+      {% else %}<p class="hint">{{ 'Отправитель:' if direction == 'received' else 'Получатель:' }} {{ task.sender_department.name if direction == 'received' else task.recipient_department.name }}</p>{% endif %}
+      <p class="hint">Автор: {{ task.author.full_name }} · Создана: {{ task.created_at|task_datetime }}</p>
+      {% if task.status in ('draft', 'pending_approval') %}<p class="hint">Получателю пока не видна</p>{% endif %}
+      {% if direction == 'completed' %}<p class="hint">{{ 'Завершена' if task.status == 'completed' else ('Отменена' if task.status == 'cancelled' else 'Отклонена') }}: {{ task.completed_at|task_datetime if task.status == 'completed' and task.completed_at else (task.closed_at|task_datetime if task.status != 'completed' and task.closed_at else 'дата и время неизвестны (историческая запись)') }}</p>{% endif %}
+    </div>
+    <div class="task-card-side">
+      <div><span class="hint">Срок · {{ config.TASK_TIMEZONE }}</span><strong>{{ task.due_at|task_datetime if task.due_at else 'Не указан — историческая задача' }}</strong><p class="task-clock{% if clock.overdue %} task-overdue{% endif %}">{{ clock.text }}</p></div>
+      <div><span class="hint">Исполнитель</span><strong>{{ task.assignee.full_name if task.assignee else 'Не назначен' }}</strong></div>
+      <a class="button secondary-button" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">Открыть<span class="sr-only"> задачу «{{ task.title }}»</span></a>
+    </div>
+  </article>
+  {% else %}
+  <div class="card task-empty"><h2>{{ 'На этой странице задач нет' if pagination.total else 'Задач пока нет' }}</h2>
+    <p>{% if direction == 'received' %}Здесь появятся поручения, отправленные вашему отделу.{% elif direction == 'sent' %}Здесь находятся черновики, согласование и отправленные поручения.{% else %}Сюда поступают завершённые, отменённые и отклонённые задачи обоих направлений.{% endif %}</p>
+    {% if pagination.total %}<a href="{{ url_for(list_endpoints[direction]) }}">На первую страницу</a>{% elif direction == 'sent' and may_create %}<a class="button" href="{{ url_for('tasks.task_new') }}">Создать задачу</a>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+{% if pagination.pages > 1 %}<nav class="actions task-pagination" aria-label="Страницы задач">
+  {% if pagination.has_prev %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.prev_num, view=view if direction != 'completed' else none) }}">Назад</a>{% endif %}
+  <span>Страница {{ pagination.page }} из {{ pagination.pages }}</span>
+  {% if pagination.has_next %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.next_num, view=view if direction != 'completed' else none) }}">Далее</a>{% endif %}
+</nav>{% endif %}
+{% if direction != 'completed' %}<script src="{{ url_for('static', filename='tasks.js') }}" defer></script>{% endif %}
+{% endblock %}
