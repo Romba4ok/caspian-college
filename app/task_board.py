@@ -10,6 +10,11 @@ from .models import Task, TaskAttachment, TaskComment, User
 
 
 BOARD_GROUPS = {
+    "completed": (
+        ("completed", "Завершены", ("completed",)),
+        ("cancelled", "Отменены", ("cancelled",)),
+        ("rejected", "Отклонены", ("rejected",)),
+    ),
     "received": (
         ("to_do", "К выполнению", ("awaiting_assignment", "assigned")),
         ("working", "В работе", ("in_progress",)),
@@ -28,7 +33,7 @@ BOARD_GROUPS = {
 
 
 def load_board_projection(visible_query, direction, actions_for_task):
-    """Read every visible active task without fetching its discussion or files.
+    """Read every visible task without fetching its discussion or files.
 
     The query retains the route's visibility, direction and ordering. Capability
     checks remain in the existing actions_for_task policy, not this grouping.
@@ -52,7 +57,7 @@ def load_board_projection(visible_query, direction, actions_for_task):
         group = group_for_status[task.status]
         group["tasks"].append(task)
         group["count"] += 1
-        actions[task.id] = actions_for_task(task)
+        actions[task.id] = [] if direction == "completed" else actions_for_task(task)
         if any(action["assignee"] for action in actions[task.id]):
             assignment_departments.add(task.recipient_department_id)
 

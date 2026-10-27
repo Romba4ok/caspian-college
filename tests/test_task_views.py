@@ -94,7 +94,7 @@ class TaskViewTests(PortalCase):
         self.assertEqual({draft,sent},set(self.ids_on(source)));self.assertNotIn('href="/tasks/new"',source)
         self.assertIn("Отправитель:",source);self.assertIn("Получатель:",source)
         self.assertEqual([1,2,1],self.counts(source))
-        self.assertEqual({closed},set(self.ids_on(self.page("/tasks/completed?scope=sent"))))
+        self.assertEqual({closed},set(self.ids_on(self.page("/tasks/completed?scope=sent&view=list"))))
 
     def test_obsolete_filters_cannot_change_either_list_or_counts(self):
         self.sent(priority="low");self.sent(priority="urgent");self.incoming()
@@ -118,7 +118,7 @@ class TaskViewTests(PortalCase):
         old=self.sent(status="completed",completed_at=self.now-timedelta(days=1),closed_at=self.now-timedelta(days=1))
         new=self.sent(status="cancelled",closed_at=self.now)
         unknown=self.sent(status="rejected",closed_at=None)
-        self.as_user();source=self.page("/tasks/completed?scope=sent")
+        self.as_user();source=self.page("/tasks/completed?scope=sent&view=list")
         self.assertEqual([new,old,unknown],self.ids_on(source))
         self.assertIn("дата и время неизвестны (историческая запись)",source)
 
@@ -248,6 +248,6 @@ class TaskViewTests(PortalCase):
         self.as_user()
         for direction in ("received","sent","completed"):
             source=self.page("/tasks/"+direction)
-            self.assertIn("Задач пока нет",source);self.assertIn('<html lang="ru">',source)
+            self.assertIn("Закрытых задач в выбранном направлении пока нет." if direction == "completed" else "Задач пока нет",source);self.assertIn('<html lang="ru">',source)
             for forbidden in ('action="/language"','>Студенты<','>Преподаватели<','>Группы<','Проверка знаний'):
                 self.assertNotIn(forbidden,source)

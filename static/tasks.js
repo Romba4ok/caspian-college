@@ -35,7 +35,7 @@
     revoked = true; needsRead = true; states.clear();
     const root = document.querySelector("[data-board-root]");
     root?.replaceChildren();
-    if (root) for (const name of ["data-counts","data-csrf-token","data-user-id","data-refresh-url"]) root.removeAttribute(name);
+    if (root) for (const name of ["data-counts","data-total","data-csrf-token","data-user-id","data-refresh-url"]) root.removeAttribute(name);
     document.querySelectorAll(".task-list-heading .hint,.task-page-heading .hint").forEach(e => { e.textContent = ""; });
     active = null; source = null; pointerDrag = null; columns = []; columnStates.clear();
     document.querySelectorAll(".task-tab-count").forEach(e => { e.textContent = "—"; e.removeAttribute("aria-label"); });
@@ -68,6 +68,8 @@
       throw new Error("Invalid board fragment");
     const counts = JSON.parse(fresh.dataset.counts);
     if (!["received","sent","completed"].every(k => Number.isInteger(counts[k]) && counts[k] >= 0)) throw new Error("Invalid totals");
+    const visibleTotal = Number(fresh.dataset.total ?? counts[initialDirection]);
+    if (!Number.isInteger(visibleTotal) || visibleTotal < 0) throw new Error("Invalid visible total");
     const position = {left:window.scrollX,top:window.scrollY};
     document.querySelector("[data-board-root]").replaceWith(document.importNode(fresh,true));
     form.querySelector('[name="csrf_token"]').value = fresh.dataset.csrfToken;
@@ -75,7 +77,7 @@
       const name = new URL(link.href).pathname.split("/").pop(), badge = link.querySelector(".task-tab-count");
       if (badge && Object.hasOwn(counts,name)) { badge.textContent = counts[name]; badge.setAttribute("aria-label",`Всего задач: ${counts[name]}`); }
     });
-    const total = document.querySelector(".task-list-heading .hint"); if (total) total.textContent = `Всего: ${counts[initialDirection]}`;
+    const total = document.querySelector(".task-list-heading .hint"); if (total) total.textContent = `Всего: ${visibleTotal}`;
     bindBoard();
     if (phase === "posted" && active) document.querySelector(`[data-task-id="${active.id}"]`)?.classList.add("board-card-updated");
     window.scrollTo(position); needsRead = false; retryBoard.hidden = true;

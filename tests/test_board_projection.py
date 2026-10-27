@@ -202,10 +202,10 @@ class BoardProjectionTests(PortalCase):
         self.assertEqual(302, response.status_code)
         self.assertNotIn("Поручение", response.get_data(as_text=True))
 
-    def test_completed_and_invalid_views_keep_paginated_list(self):
+    def test_completed_explicit_list_and_invalid_views_keep_pagination(self):
         self.task_batch(36, statuses=("completed",))
         self.as_user()
-        response, context = self.board("completed", "view=board&scope=sent")
+        response, context = self.board("completed", "view=list&scope=sent")
         self.assertEqual("list", context["view"])
         self.assertEqual(25, len(context["tasks"]))
         self.assertEqual([], context["board_groups"])

@@ -74,9 +74,9 @@ class BoardRefreshTests(PortalCase):
         self.as_user('root');two=self.fragment().headers['X-Task-User']
         self.assertNotEqual(one,two)
 
-    def test_fragment_flag_cannot_turn_completed_or_list_into_a_board(self):
+    def test_fragment_flag_cannot_turn_explicit_list_into_a_board(self):
         self.as_user()
-        for path in ('/tasks/completed?view=board&fragment=board','/tasks/sent?view=list&fragment=board','/tasks/sent?view=board&fragment=unknown'):
+        for path in ('/tasks/completed?view=list&fragment=board','/tasks/sent?view=list&fragment=board','/tasks/sent?view=board&fragment=unknown'):
             response=self.client.get(path)
             self.assertEqual(400,response.status_code)
             self.assertIn('no-store',response.headers['Cache-Control'])

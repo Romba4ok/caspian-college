@@ -18,18 +18,16 @@
 </nav>
 <div class="task-toolbar">
 <div class="task-list-heading{% if view == 'board' %} sr-only{% endif %}"><h2>{{ list_labels[direction] }}</h2><p class="hint">Всего: {{ pagination.total }}{% if view != 'board' and pagination.pages %} · Страница {{ pagination.page }} из {{ pagination.pages }}{% endif %}</p></div>
-{% if direction != 'completed' %}
 <nav class="task-view-switch" aria-label="Вид задач" data-task-view="{{ view }}" data-user-id="{{ current_user.id }}" data-direction="{{ direction }}">
-  <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='list', page=pagination.page) }}" {% if view == 'list' %}aria-current="true"{% endif %}>Список</a>
-  <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='board') }}" {% if view == 'board' %}aria-current="true"{% endif %}>Доска</a>
+  <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='list', page=pagination.page, scope=completed_scope) }}" {% if view == 'list' %}aria-current="true"{% endif %}>Список</a>
+  <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='board', scope=completed_scope) }}" {% if view == 'board' %}aria-current="true"{% endif %}>Доска</a>
 </nav>
-{% endif %}
 </div>
 </div>
 {% if direction == 'completed' and completed_scope %}
 <nav class="task-view-switch completed-direction-switch" aria-label="Направление завершённых задач">
-  <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='received') }}" {% if completed_scope == 'received' %}aria-current="page"{% endif %}>Задачи нашему отделу</a>
-  <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='sent') }}" {% if completed_scope == 'sent' %}aria-current="page"{% endif %}>Задачи другим отделам</a>
+  <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='received', view=view) }}" {% if completed_scope == 'received' %}aria-current="page"{% endif %}>Задачи нашему отделу</a>
+  <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='sent', view=view) }}" {% if completed_scope == 'sent' %}aria-current="page"{% endif %}>Задачи другим отделам</a>
 </nav>
 {% endif %}
 <p class="task-direction-help">{% if direction == 'completed' %}{{ 'Закрытые поручения всех отделов. На карточке указаны отдел-заказчик и исполняющий отдел.' if current_user.role == 'admin' else ('Закрытые поручения, поступившие нашему отделу.' if completed_scope == 'received' else 'Закрытые заявки и поручения нашего отдела другим отделам.') }}{% elif direction == 'received' %}{{ 'Поручения, поступившие в отделы-исполнители.' if current_user.role == 'admin' else 'Поручения, которые выполняет наш отдел.' }} Готовый результат сначала проверяет начальник исполняющего отдела, затем принимает отдел-заказчик.{% else %}{{ 'Поручения, которые отделы выдают друг другу, включая черновики.' if current_user.role == 'admin' else 'Наши поручения другим отделам, включая черновики и согласование отправки.' }} Передача готового результата на проверку — отдельный этап этого же поручения.{% endif %}</p>
@@ -73,5 +71,5 @@
   <span>Страница {{ pagination.page }} из {{ pagination.pages }}</span>
   {% if pagination.has_next %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.next_num, view=view if direction != 'completed' else none, scope=completed_scope) }}">Далее</a>{% endif %}
 </nav>{% endif %}
-{% if direction != 'completed' %}<script src="{{ url_for('static', filename='tasks.js') }}" defer></script>{% endif %}
+<script src="{{ url_for('static', filename='tasks.js') }}" defer></script>
 {% endblock %}

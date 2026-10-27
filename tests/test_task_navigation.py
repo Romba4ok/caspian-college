@@ -24,7 +24,7 @@ class TaskNavigationTests(PortalCase):
 
     def test_default_is_board_but_explicit_list_remains_available(self):
         self.as_user("head")
-        for direction in ("received", "sent"):
+        for direction in ("received", "sent", "completed"):
             default = self.client.get(f"/tasks/{direction}").get_data(as_text=True)
             listed = self.client.get(f"/tasks/{direction}?view=list").get_data(as_text=True)
             self.assertIn('data-task-view="board"', default)
@@ -68,7 +68,7 @@ class TaskNavigationTests(PortalCase):
         self.as_user("head")
         first = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
         self.assertIn("scope=sent", first)
-        last = self.client.get("/tasks/completed?scope=sent&page=999").get_data(as_text=True)
+        last = self.client.get("/tasks/completed?scope=sent&view=list&page=999").get_data(as_text=True)
         self.assertIn("Страница 2 из 2", last)
         self.assertEqual(5, last.count('data-task-id="'))
         detail = self.client.get(f"/tasks/{ids[0]}").get_data(as_text=True)

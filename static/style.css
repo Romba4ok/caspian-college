@@ -505,3 +505,5 @@ html{scroll-padding-block:80px 24px}
 
 .completed-direction-switch { display:flex; flex-wrap:wrap; width:fit-content; max-width:100%; margin:0 0 16px; gap:4px; }
 .completed-direction-switch a[aria-current=page] { background:var(--accent); color:white; border-color:var(--accent); }
+
+.task-board.task-board-closed { grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }

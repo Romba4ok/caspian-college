@@ -185,7 +185,7 @@ def _list_context(direction):
     else:
         ordered = query.order_by(Task.due_at.is_(None), Task.due_at.asc(), Task.created_at.desc(), Task.id.desc())
     moment = _now()
-    view = "board" if direction != "completed" and request.args.get("view", "board") == "board" else "list"
+    view = "board" if request.args.get("view", "board") == "board" else "list"
     board_data = {}
     groups = []
     if view == "board":
@@ -193,7 +193,8 @@ def _list_context(direction):
         tasks, pagination, groups = projection.tasks, projection.pagination, projection.groups
         # Match the groups and current tab to the same materialized SQL result,
         # even if another request changed a task since the earlier tab counts.
-        counts[direction] = pagination.total
+        if not completed_scope:
+            counts[direction] = pagination.total
         for task in tasks:
             board_data[task.id] = dict(id=task.id, title=task.title, revision=task.revision,
                 status=task.status, detail_url=url_for("tasks.task_detail", task_id=task.id),
