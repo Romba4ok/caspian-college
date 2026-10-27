@@ -26,7 +26,13 @@
 {% endif %}
 </div>
 </div>
-<p class="task-direction-help">{% if direction == 'completed' %}{{ 'Закрытые поручения всех отделов. На карточке указаны отдел-заказчик и исполняющий отдел.' if current_user.role == 'admin' else 'Закрытые поручения обоих направлений. На карточке указано, наш отдел выдавал задачу или выполнял её.' }}{% elif direction == 'received' %}{{ 'Поручения, поступившие в отделы-исполнители.' if current_user.role == 'admin' else 'Поручения, которые выполняет наш отдел.' }} Готовый результат сначала проверяет начальник исполняющего отдела, затем принимает отдел-заказчик.{% else %}{{ 'Поручения, которые отделы выдают друг другу, включая черновики.' if current_user.role == 'admin' else 'Наши поручения другим отделам, включая черновики и согласование отправки.' }} Передача готового результата на проверку — отдельный этап этого же поручения.{% endif %}</p>
+{% if direction == 'completed' and completed_scope %}
+<nav class="task-view-switch completed-direction-switch" aria-label="Направление завершённых задач">
+  <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='received') }}" {% if completed_scope == 'received' %}aria-current="page"{% endif %}>Задачи нашему отделу</a>
+  <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='sent') }}" {% if completed_scope == 'sent' %}aria-current="page"{% endif %}>Задачи другим отделам</a>
+</nav>
+{% endif %}
+<p class="task-direction-help">{% if direction == 'completed' %}{{ 'Закрытые поручения всех отделов. На карточке указаны отдел-заказчик и исполняющий отдел.' if current_user.role == 'admin' else ('Закрытые поручения, поступившие нашему отделу.' if completed_scope == 'received' else 'Закрытые заявки и поручения нашего отдела другим отделам.') }}{% elif direction == 'received' %}{{ 'Поручения, поступившие в отделы-исполнители.' if current_user.role == 'admin' else 'Поручения, которые выполняет наш отдел.' }} Готовый результат сначала проверяет начальник исполняющего отдела, затем принимает отдел-заказчик.{% else %}{{ 'Поручения, которые отделы выдают друг другу, включая черновики.' if current_user.role == 'admin' else 'Наши поручения другим отделам, включая черновики и согласование отправки.' }} Передача готового результата на проверку — отдельный этап этого же поручения.{% endif %}</p>
 {% if view == 'board' %}
   {% include 'tasks/board.html' %}
 {% else %}
@@ -56,16 +62,16 @@
   </article>
   {% else %}
   <div class="card task-empty"><h2>{{ 'На этой странице задач нет' if pagination.total else 'Задач пока нет' }}</h2>
-    <p>{% if direction == 'received' %}Здесь появятся поручения, отправленные вашему отделу.{% elif direction == 'sent' %}Здесь находятся черновики, согласование и отправленные поручения.{% else %}Сюда поступают завершённые, отменённые и отклонённые задачи обоих направлений.{% endif %}</p>
+    <p>{% if direction == 'received' %}Здесь появятся поручения, отправленные вашему отделу.{% elif direction == 'sent' %}Здесь находятся черновики, согласование и отправленные поручения.{% else %}Здесь появятся завершённые, отменённые и отклонённые задачи выбранного направления.{% endif %}</p>
     {% if pagination.total %}<a href="{{ url_for(list_endpoints[direction]) }}">На первую страницу</a>{% elif direction == 'sent' and may_create %}<a class="button" href="{{ url_for('tasks.task_new') }}">Создать задачу</a>{% endif %}
   </div>
   {% endfor %}
 </section>
 {% endif %}
 {% if pagination.pages > 1 %}<nav class="actions task-pagination" aria-label="Страницы задач">
-  {% if pagination.has_prev %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.prev_num, view=view if direction != 'completed' else none) }}">Назад</a>{% endif %}
+  {% if pagination.has_prev %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.prev_num, view=view if direction != 'completed' else none, scope=completed_scope) }}">Назад</a>{% endif %}
   <span>Страница {{ pagination.page }} из {{ pagination.pages }}</span>
-  {% if pagination.has_next %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.next_num, view=view if direction != 'completed' else none) }}">Далее</a>{% endif %}
+  {% if pagination.has_next %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.next_num, view=view if direction != 'completed' else none, scope=completed_scope) }}">Далее</a>{% endif %}
 </nav>{% endif %}
 {% if direction != 'completed' %}<script src="{{ url_for('static', filename='tasks.js') }}" defer></script>{% endif %}
 {% endblock %}

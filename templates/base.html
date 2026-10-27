@@ -13,17 +13,19 @@
         <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">CC</span><span class="brand-name">Caspian College<small>{{ t('Платформа отделов') }}</small></span></a>
         {% if g.user %}
         <nav class="primary-nav" aria-label="{{ t('Основная навигация') }}">
+          {% if g.user['role'] in ['head', 'employee', 'admin'] and (g.user['role'] == 'admin' or g.user['department_id']) %}
+          <a class="nav-link" href="{{ url_for('tasks.received_tasks') }}" {% if request.blueprint == 'tasks' and not request.endpoint.startswith('tasks.notification_') %}aria-current="page"{% endif %}>{{ t('Задачи') }}</a>
+          {% endif %}
           {% if g.user['role'] == 'admin' %}
           <a class="nav-link" href="{{ url_for('admin.admin_users') }}" {% if request.endpoint and request.endpoint.startswith('admin.admin_user') %}aria-current="page"{% endif %}>{{ t('Пользователи') }}</a>
           <a class="nav-link" href="{{ url_for('admin.admin_departments') }}" {% if request.endpoint and request.endpoint.startswith('admin.admin_department') %}aria-current="page"{% endif %}>Отделы</a>
           <a class="nav-link" href="{{ url_for('admin.admin_categories') }}" {% if request.endpoint and request.endpoint.startswith('admin.admin_categor') %}aria-current="page"{% endif %}>Категории</a>
           <a class="nav-link" href="{{ url_for('admin.admin_settings') }}" {% if request.endpoint == 'admin.admin_settings' %}aria-current="page"{% endif %}>Настройки</a>
-          <a class="nav-link" href="{{ url_for('admin.admin_statistics') }}" {% if request.endpoint == 'admin.admin_statistics' %}aria-current="page"{% endif %}>Статистика</a>
           <a class="nav-link" href="{{ url_for('admin.admin_audit') }}" {% if request.endpoint == 'admin.admin_audit' %}aria-current="page"{% endif %}>Журнал</a>
           {% endif %}
-          {% if g.user['role'] == 'head' %}<a class="nav-link" href="{{ url_for('reports.own_department_report') }}" {% if request.blueprint == 'reports' %}aria-current="page"{% endif %}>Отчёт отдела</a>{% endif %}
+          {% if g.user['role'] == 'head' %}<a class="nav-link" href="{{ url_for('reports.own_department_report') }}" {% if request.blueprint == 'reports' %}aria-current="page"{% endif %}>Отчёты</a>{% endif %}
+          {% if g.user['role'] == 'admin' %}<a class="nav-link" href="{{ url_for('admin.admin_statistics') }}" {% if request.endpoint == 'admin.admin_statistics' %}aria-current="page"{% endif %}>Отчёты</a>{% endif %}
           {% if g.user['role'] in ['head', 'employee', 'admin'] and (g.user['role'] == 'admin' or g.user['department_id']) %}
-          <a class="nav-link" href="{{ url_for('tasks.received_tasks') }}" {% if request.blueprint == 'tasks' and not request.endpoint.startswith('tasks.notification_') %}aria-current="page"{% endif %}>{{ t('Задачи') }}</a>
           <a class="nav-link" href="{{ url_for('tasks.notification_center') }}" {% if request.endpoint and request.endpoint.startswith('tasks.notification_') %}aria-current="page"{% endif %}>{{ t('Уведомления') }} <span class="notification-count" role="status" aria-live="polite" aria-atomic="true" aria-label="{{ t('Непрочитанных уведомлений: {count}', count=unread_notification_count) }}">{{ unread_notification_count }}</span></a>
           {% endif %}
         </nav>

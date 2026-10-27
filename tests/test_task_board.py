@@ -145,7 +145,7 @@ class TaskBoardTests(PortalCase):
 
     def test_terminal_view_has_no_board_or_switch(self):
         closed=self.task_sent(status="completed");self.as_user()
-        page=self.page("completed");self.assertIn(closed,self.ids_on(page))
+        page=self.page("completed",query="view=board&scope=sent");self.assertIn(closed,self.ids_on(page))
         self.assertNotIn('class="task-board"',page);self.assertNotIn('aria-label="Вид задач"',page)
 
     def test_private_drafts_cancelled_and_other_department_data_not_in_board_json(self):

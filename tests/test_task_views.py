@@ -71,7 +71,7 @@ class TaskViewTests(PortalCase):
             recipient_department_id=self.other_department_id)
         self.as_user()
         for path, expected in (("received",{incoming}),("sent",{draft,pending,outgoing}),
-            ("completed",{completed,cancelled,rejected,private_cancel})):
+            ("completed?scope=received",{cancelled}),("completed?scope=sent",{completed,rejected,private_cancel})):
             source=self.page("/tasks/"+path)
             self.assertEqual(expected,set(self.ids_on(source)))
             self.assertEqual([1,3,4],self.counts(source))
@@ -90,11 +90,11 @@ class TaskViewTests(PortalCase):
         draft=self.task(); sent=self.sent(); closed=self.incoming(status="rejected")
         self.as_user("root")
         self.assertEqual({sent},set(self.ids_on(self.page("/tasks/received"))))
-        source=self.page("/tasks/sent")
+        source=self.page("/tasks/sent?view=list")
         self.assertEqual({draft,sent},set(self.ids_on(source)));self.assertNotIn('href="/tasks/new"',source)
         self.assertIn("Отправитель:",source);self.assertIn("Получатель:",source)
         self.assertEqual([1,2,1],self.counts(source))
-        self.assertEqual({closed},set(self.ids_on(self.page("/tasks/completed"))))
+        self.assertEqual({closed},set(self.ids_on(self.page("/tasks/completed?scope=sent"))))
 
     def test_obsolete_filters_cannot_change_either_list_or_counts(self):
         self.sent(priority="low");self.sent(priority="urgent");self.incoming()
@@ -118,13 +118,13 @@ class TaskViewTests(PortalCase):
         old=self.sent(status="completed",completed_at=self.now-timedelta(days=1),closed_at=self.now-timedelta(days=1))
         new=self.sent(status="cancelled",closed_at=self.now)
         unknown=self.sent(status="rejected",closed_at=None)
-        self.as_user();source=self.page("/tasks/completed")
+        self.as_user();source=self.page("/tasks/completed?scope=sent")
         self.assertEqual([new,old,unknown],self.ids_on(source))
         self.assertIn("дата и время неизвестны (историческая запись)",source)
 
     def test_pages_have_no_overlap_and_keep_all_tab_counts(self):
         ids=[self.sent(created_at=self.now,due_at=self.now) for _ in range(28)]
-        self.as_user();first=self.page("/tasks/sent");second=self.page("/tasks/sent?page=2")
+        self.as_user();first=self.page("/tasks/sent?view=list");second=self.page("/tasks/sent?view=list&page=2")
         self.assertEqual(list(reversed(ids))[:25],self.ids_on(first))
         self.assertEqual(list(reversed(ids))[25:],self.ids_on(second))
         self.assertEqual([0,28,0],self.counts(second));self.assertIn("Страница 2 из 2",second)
@@ -132,9 +132,9 @@ class TaskViewTests(PortalCase):
 
     def test_invalid_and_out_of_range_pages_have_safe_navigation(self):
         self.sent();self.as_user()
-        self.assertEqual(1,len(self.ids_on(self.page("/tasks/sent?page=broken"))))
-        self.assertEqual(1,len(self.ids_on(self.page("/tasks/sent?page=-2"))))
-        source=self.page("/tasks/sent?page=999");self.assertEqual(1,len(self.ids_on(source)))
+        self.assertEqual(1,len(self.ids_on(self.page("/tasks/sent?view=list&page=broken"))))
+        self.assertEqual(1,len(self.ids_on(self.page("/tasks/sent?view=list&page=-2"))))
+        source=self.page("/tasks/sent?view=list&page=999");self.assertEqual(1,len(self.ids_on(source)))
         self.assertIn("Страница 1 из 1",source)
 
     def test_overdue_only_after_dispatch_and_never_active_after_closing(self):
@@ -157,7 +157,7 @@ class TaskViewTests(PortalCase):
         with self.app.app_context():
             task=db.session.get(Task,ident);task.status="completed";task.completed_at=self.now;task.closed_at=self.now;db.session.commit()
         source=self.page(f"/tasks/{ident}");self.assertIn("Завершена: 10.01.2030 15:00",source)
-        self.assertIn('href="/tasks/completed"',source)
+        self.assertIn('href="/tasks/completed?scope=sent"',source)
 
     def test_unknown_historical_due_and_send_are_not_fabricated(self):
         ident=self.sent(due_at=None,legacy_missing_due=True,is_legacy_dispatched=True,sent_at=None)

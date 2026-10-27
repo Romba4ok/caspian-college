@@ -172,12 +172,20 @@ def _attention(task):
 def _list_context(direction):
     query = _visible_task_query(direction)
     counts = {key: _visible_task_query(key).count() for key in LIST_ENDPOINTS}
+    completed_scope = None
+    if direction == "completed" and current_user.role != "admin":
+        completed_scope = request.args.get("scope", "received")
+        if completed_scope not in ("received", "sent"):
+            completed_scope = "received"
+        field = Task.recipient_department_id if completed_scope == "received" else Task.sender_department_id
+        query = query.filter(field == current_user.department_id)
+    list_total = query.count() if completed_scope else counts[direction]
     if direction == "completed":
         ordered = query.order_by(Task.closed_at.is_(None), Task.closed_at.desc(), Task.created_at.desc(), Task.id.desc())
     else:
         ordered = query.order_by(Task.due_at.is_(None), Task.due_at.asc(), Task.created_at.desc(), Task.id.desc())
     moment = _now()
-    view = "board" if direction != "completed" and request.args.get("view") == "board" else "list"
+    view = "board" if direction != "completed" and request.args.get("view", "board") == "board" else "list"
     board_data = {}
     groups = []
     if view == "board":
@@ -198,7 +206,7 @@ def _list_context(direction):
                     for u in projection.candidates[task.id]])
     else:
         pagination = ordered.options(undefer("*")).paginate(
-            page=min(max(1, request.args.get("page", 1, type=int)), max(1, (counts[direction] + 24) // 25)),
+            page=min(max(1, request.args.get("page", 1, type=int)), max(1, (list_total + 24) // 25)),
             per_page=25, error_out=False)
         tasks = pagination.items
     columns = [key for key in STATUS_LABELS if key not in TERMINAL and (direction != "received" or key not in PRE_DISPATCH)]
@@ -207,7 +215,7 @@ def _list_context(direction):
                      if current_user.role == "admin" else LIST_LABELS), list_endpoints=LIST_ENDPOINTS,
         view=view, board_data=board_data, board_columns=columns, board_groups=groups,
         upload_policy=_detail_upload_policy() if view == "board" else None,
-        counts=counts,
+        counts=counts, completed_scope=completed_scope,
         may_create=can_create_task(current_user),
         deadline_states={task.id: _deadline_state(task, moment) for task in tasks},
         attention={task.id: _attention(task) for task in tasks},
@@ -501,6 +509,8 @@ def _detail_context(task, *, action_error=None, failed_action=None):
         back_endpoint="tasks.completed_tasks" if task.status in TERMINAL else (
             "tasks.received_tasks" if current_user.department_id == task.recipient_department_id and is_task_dispatched(task)
             else "tasks.sent_tasks"),
+        back_scope=("sent" if current_user.department_id == task.sender_department_id else "received")
+            if task.status in TERMINAL and current_user.role != "admin" else None,
         priority_labels=PRIORITY_LABELS, may_edit=can_edit_draft(current_user, task),
         approval_actions=[(a["key"], a["label"]) for a in actions if a["group"] == "approval"],
         execution_actions=[(a["key"], a["label"]) for a in actions if a["group"] == "execution"],

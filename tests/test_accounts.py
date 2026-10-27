@@ -10,7 +10,7 @@ from support.portal_fixtures import PortalCase
 
 class AccountAccessTests(PortalCase):
     def test_three_roles_login_and_initial_destinations(self):
-        for name, location in (("root", "/admin/users"), ("head", "/tasks/received"), ("employee", "/tasks/received")):
+        for name, location in (("root", "/tasks/received"), ("head", "/tasks/received"), ("employee", "/tasks/received")):
             client = self.app.test_client()
             self.assertEqual(302, self.login(name, client=client, follow=False).status_code)
             self.assertTrue(client.get("/").location.endswith(location))

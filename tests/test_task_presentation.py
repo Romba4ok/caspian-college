@@ -40,29 +40,31 @@ class TaskPresentationTests(PortalCase):
         self.task(**closed, author_id=self.ids["receiver-head"],
                   sender_department_id=self.other_department_id, recipient_department_id=self.department_id)
         self.as_user("head")
-        html = self.client.get("/tasks/completed").get_data(as_text=True)
+        html = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
         self.assertIn("Наш отдел поручал", html)
-        self.assertIn("Наш отдел выполнял", html)
-        self.assertEqual(2, html.count("принял результат. Поручение завершено."))
+        incoming = self.client.get("/tasks/completed?scope=received").get_data(as_text=True)
+        self.assertIn("Наш отдел выполнял", incoming)
+        self.assertEqual(1, html.count("принял результат. Поручение завершено."))
+        self.assertEqual(1, incoming.count("принял результат. Поручение завершено."))
 
     def test_cancelled_draft_is_not_presented_as_dispatched(self):
         self.task(status="cancelled", closed_at=self.sent)
         self.as_user("head")
-        html = self.client.get("/tasks/completed").get_data(as_text=True)
+        html = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
         self.assertIn("Заявка нашего отдела", html)
         self.assertIn("Заявка отменена до отправки другому отделу.", html)
 
     def test_legacy_cancelled_task_uses_legacy_dispatch_marker(self):
         self.task(status="cancelled", closed_at=self.sent, is_legacy_dispatched=True)
         self.as_user("head")
-        html = self.client.get("/tasks/completed").get_data(as_text=True)
+        html = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
         self.assertIn("отменил поручение.", html)
         self.assertNotIn("Заявка отменена до отправки другому отделу.", html)
 
     def test_rejection_does_not_claim_the_recipient_performed_the_task(self):
         self.task(status="rejected", sent_at=self.sent, closed_at=self.sent)
         self.as_user("receiver-head")
-        html = self.client.get("/tasks/completed").get_data(as_text=True)
+        html = self.client.get("/tasks/completed?scope=received").get_data(as_text=True)
         self.assertIn("Поручение нашему отделу", html)
         self.assertIn("отклонил поручение.", html)
         self.assertNotIn("Наш отдел выполнял", html)
@@ -77,7 +79,7 @@ class TaskPresentationTests(PortalCase):
     def test_admin_copy_does_not_claim_a_department(self):
         self.task(status="sender_acceptance", sent_at=self.sent)
         self.as_user("root")
-        html = self.client.get("/tasks/sent").get_data(as_text=True)
+        html = self.client.get("/tasks/sent?view=list").get_data(as_text=True)
         self.assertIn("Заказчик:", html)
         self.assertIn("Исполняющий отдел:", html)
         self.assertNotIn("Наш отдел — заказчик", html)

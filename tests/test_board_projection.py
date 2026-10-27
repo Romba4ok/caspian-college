@@ -79,7 +79,7 @@ class BoardProjectionTests(PortalCase):
         self.assert_groups(context, {
             "К выполнению": ("awaiting_assignment", "assigned"),
             "В работе": ("in_progress",), "Уточнение": ("awaiting_clarification",),
-            "Результат: внутренняя проверка": ("recipient_review",),
+            "Результат: проверка у начальника отдела": ("recipient_review",),
             "Результат: приёмка заказчиком": ("sender_acceptance",),
         }, ids)
 
@@ -205,7 +205,7 @@ class BoardProjectionTests(PortalCase):
     def test_completed_and_invalid_views_keep_paginated_list(self):
         self.task_batch(36, statuses=("completed",))
         self.as_user()
-        response, context = self.board("completed")
+        response, context = self.board("completed", "view=board&scope=sent")
         self.assertEqual("list", context["view"])
         self.assertEqual(25, len(context["tasks"]))
         self.assertEqual([], context["board_groups"])

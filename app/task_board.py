@@ -14,7 +14,7 @@ BOARD_GROUPS = {
         ("to_do", "К выполнению", ("awaiting_assignment", "assigned")),
         ("working", "В работе", ("in_progress",)),
         ("clarification", "Уточнение", ("awaiting_clarification",)),
-        ("recipient_review", "Результат: внутренняя проверка", ("recipient_review",)),
+        ("recipient_review", "Результат: проверка у начальника отдела", ("recipient_review",)),
         ("sender_acceptance", "Результат: приёмка заказчиком", ("sender_acceptance",)),
     ),
     "sent": (

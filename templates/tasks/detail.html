@@ -3,7 +3,7 @@
 {% block content %}
 {% import 'tasks/_task_readonly.html' as read with context %}
 <div class="page-heading task-detail-heading">
-  <div><p class="hint"><a href="{{ url_for(back_endpoint) }}">{{ t('К списку задач') }}</a></p><h1>{{ task.title }}</h1><p>{{ t(task.sender_department.name) }} → {{ t(task.recipient_department.name) }}</p></div>
+  <div><p class="hint"><a href="{{ url_for(back_endpoint, scope=back_scope) }}">{{ t('К списку задач') }}</a></p><h1>{{ task.title }}</h1><p>{{ t(task.sender_department.name) }} → {{ t(task.recipient_department.name) }}</p></div>
   {% if may_edit %}<a class="button secondary-button" href="{{ url_for('tasks.task_edit', task_id=task.id) }}">{{ t('Редактировать') }}</a>{% endif %}
 </div>
 

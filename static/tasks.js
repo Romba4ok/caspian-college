@@ -3,18 +3,7 @@
   "use strict";
   const viewSwitch = document.querySelector("[data-task-view]");
   if (!viewSwitch) return;
-  const key = `department-task-view:${viewSwitch.dataset.userId}:${viewSwitch.dataset.direction}`;
-  const current = new URL(window.location.href);
-  const explicit = current.searchParams.get("view");
-  try {
-    const saved = localStorage.getItem(key);
-    if (!explicit && (saved === "board" || saved === "list") && saved !== viewSwitch.dataset.taskView) {
-      current.searchParams.set("view", saved);
-      window.location.replace(current);
-      return;
-    }
-    if (explicit === "board" || explicit === "list") localStorage.setItem(key, explicit);
-  } catch (_) { /* A restricted browser still has ordinary view links. */ }
+  // Plain task URLs always use the server default (board); ?view=list is explicit.
   const dialog = document.querySelector("#board-dialog");
   if (!dialog || typeof dialog.showModal !== "function") return;
   const feedback = document.querySelector("#board-feedback");

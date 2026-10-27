@@ -502,3 +502,6 @@ html{scroll-padding-block:80px 24px}
 .task-process-routes { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:12px; margin:12px 0 0; }
 .task-process-routes dt { color:var(--muted); font-size:12px; margin-bottom:4px; }
 .task-process-routes dd { margin:0; font-size:14px; font-weight:600; overflow-wrap:anywhere; }
+
+.completed-direction-switch { display:flex; flex-wrap:wrap; width:fit-content; max-width:100%; margin:0 0 16px; gap:4px; }
+.completed-direction-switch a[aria-current=page] { background:var(--accent); color:white; border-color:var(--accent); }

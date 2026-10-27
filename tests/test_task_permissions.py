@@ -129,7 +129,8 @@ class TaskPermissionTests(PortalCase):
         for name in ("recipient","recipient-head","outsider"):
             client=self.client_for(name)
             for url in ("/tasks/received","/tasks/sent","/tasks/completed","/tasks/completed?status=cancelled",
-                "/tasks/received?status=draft","/tasks/received?assignee_id=unassigned"):
+                "/tasks/received?status=draft","/tasks/received?assignee_id=unassigned",
+                "/tasks/completed?scope=sent","/tasks/completed?scope=received"):
                 page=client.get(url).get_data(as_text=True)
                 for title in titles:self.assertNotIn(title,page)
             self.assertNotIn(f"PRIVATE-NOTIFICATION-{self.draft}",client.get("/tasks/notifications").get_data(as_text=True))
@@ -137,7 +138,7 @@ class TaskPermissionTests(PortalCase):
         page=sender.get("/tasks/sent").get_data(as_text=True)
         for title in titles[:2]:self.assertIn(title,page)
         self.assertNotIn(titles[2],page)
-        completed=sender.get("/tasks/completed").get_data(as_text=True)
+        completed=sender.get("/tasks/completed?scope=sent").get_data(as_text=True)
         self.assertIn(titles[2],completed)
         for title in titles[:2]:self.assertNotIn(title,completed)
 

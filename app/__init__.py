@@ -86,8 +86,6 @@ def create_app(test_config=None):
     def index():
         if not current_user.is_authenticated:
             return redirect(url_for("auth.login"))
-        if current_user.role == "admin":
-            return redirect(url_for("admin.admin_users"))
         return redirect(url_for("tasks.received_tasks"))
 
     @app.errorhandler(403)
