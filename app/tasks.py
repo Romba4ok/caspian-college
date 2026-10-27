@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, current_app, g, flash, redirect, render_template, request, send_file, url_for, make_response
 from flask_login import current_user, login_required
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import undefer
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -181,9 +182,18 @@ def _list_context(direction):
         query = query.filter(field == current_user.department_id)
     list_total = query.count() if completed_scope else counts[direction]
     if direction == "completed":
-        ordered = query.order_by(Task.closed_at.is_(None), Task.closed_at.desc(), Task.created_at.desc(), Task.id.desc())
+        finished_at = case(
+            (Task.status == "completed", func.coalesce(Task.completed_at, Task.closed_at)),
+            else_=Task.closed_at,
+        )
+        ordered = query.order_by(finished_at.is_(None), finished_at.desc(), Task.created_at.desc(), Task.id.desc())
     else:
-        ordered = query.order_by(Task.due_at.is_(None), Task.due_at.asc(), Task.created_at.desc(), Task.id.desc())
+        priority_order = case(
+            (Task.priority == "urgent", 0), (Task.priority == "high", 1),
+            (Task.priority == "normal", 2), (Task.priority == "low", 3), else_=4,
+        )
+        ordered = query.order_by(priority_order, Task.due_at.is_(None), Task.due_at.asc(),
+                                 Task.created_at.desc(), Task.id.desc())
     moment = _now()
     view = "board" if request.args.get("view", "board") == "board" else "list"
     board_data = {}
