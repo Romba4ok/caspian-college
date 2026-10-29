@@ -20,44 +20,13 @@ from app import create_app
 from app.extensions import db
 from app.models import Department, Task, TaskCategory, User
 from app.reminders import run_task_reminders
-from support.migration_fixtures import fill_legacy, OLD_STATUSES
+from support.migration_fixtures import fill_legacy, OLD_STATUSES, MigrationDatabase
 
 
-class MigrationCases:
-    postgres = False
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="portal_case_")
-        self.control = None
-        config = {"SECRET_KEY": "synthetic-test-key", "ADMIN_USERNAME": "migration-admin",
-                  "ADMIN_PASSWORD": "synthetic-test-password", "WTF_CSRF_ENABLED": False,
-                  "TASK_UPLOAD_DIR": str(Path(self.temp.name) / "uploads")}
-        if self.postgres:
-            self.schema = "portal_case_" + uuid4().hex
-            self.control = sa.create_engine(os.environ["PORTAL_TEST_DATABASE_URL"])
-            with self.control.begin() as conn:
-                conn.execute(sa.text(f'CREATE SCHEMA "{self.schema}"'))
-            config.update(DATABASE=os.environ["PORTAL_TEST_DATABASE_URL"],
-                SQLALCHEMY_ENGINE_OPTIONS={"connect_args": {"options": f"-csearch_path={self.schema}"}})
-        else:
-            config["DATABASE"] = "sqlite:///" + str(Path(self.temp.name) / "case.sqlite3").replace("\\", "/")
-        self.app = create_app(config)
-        self.ctx = self.app.app_context()
-        self.ctx.push()
-
-    def tearDown(self):
-        db.session.remove()
-        db.engine.dispose()
-        self.ctx.pop()
-        if self.control is not None:
-            with self.control.begin() as conn:
-                conn.execute(sa.text(f'DROP SCHEMA "{self.schema}" CASCADE'))
-            self.control.dispose()
-        self.temp.cleanup()
-
-    def upgrade(self, revision="head"):
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade", revision], catch_exceptions=False)
-        self.assertEqual(0, result.exit_code, result.output)
+class MigrationCases(MigrationDatabase):
+    def upgrade(self, revision="20261024_07"):
+        # These tests preserve 04→07 evidence; 08 deliberately refuses old data.
+        return super().upgrade(revision)
 
     def legacy(self):
         self.upgrade("20261024_04")
@@ -215,6 +184,16 @@ class MigrationCases:
         with db.engine.connect() as conn:
             self.assertEqual("20261024_04", conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar())
 
+    def test_revision07_reminders_do_not_select_revision08_fields(self):
+        self.legacy()
+        self.upgrade()
+        before = self.rows("tasks")
+        count = run_task_reminders(now=datetime(2026, 1, 19, 9, tzinfo=timezone.utc))
+        db.session.commit()
+        self.assertGreater(count, 0)
+        self.assertEqual(before, self.rows("tasks"))
+        self.assertNotIn("creation_key", {c["name"] for c in sa.inspect(db.engine).get_columns("tasks")})
+
     def test_current_models_can_create_and_read_new_schema(self):
         db.create_all()
         dept1 = Department(slug="first", name="Первый")
@@ -227,11 +206,11 @@ class MigrationCases:
         db.session.add_all([admin, worker, category])
         db.session.flush()
         task = Task(title="New", description="New description", author_id=worker.id, sender_department_id=dept1.id,
-                    recipient_department_id=dept2.id, due_at=datetime.now(timezone.utc), priority="urgent", category_id=category.id)
+                    recipient_department_id=dept2.id, due_at=datetime.now(timezone.utc), priority="urgent", category_id=category.id, sent_at=datetime.now(timezone.utc))
         db.session.add(task)
         db.session.commit()
         db.session.expire_all()
-        self.assertEqual("draft", task.status)
+        self.assertEqual("new", task.status)
         self.assertEqual(0, task.revision)
         self.assertFalse(task.is_legacy_dispatched)
         self.assertEqual("первый", dept1.normalized_name)

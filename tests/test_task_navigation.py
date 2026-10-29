@@ -80,3 +80,87 @@ class TaskNavigationTests(PortalCase):
         html = self.client.get("/tasks/completed?scope=received").get_data(as_text=True)
         self.assertIn(f'data-task-id="{task_id}"', html)
         self.assertNotIn('aria-label="Направление завершённых задач"', html)
+
+
+class CurrentActionFormsTests(PortalCase):
+    def setUp(self):
+        super().setUp();self.add_member("worker",department_id=self.other_department_id)
+        self.add_member("receiver-head",role="head",department_id=self.other_department_id)
+
+    def test_exact_menus_and_current_item_for_every_role(self):
+        expected={"root":["/tasks/received","/admin/users","/admin/departments","/admin/audit","/admin/statistics","/tasks/notifications"],
+            "head":["/tasks/received","/staff","/reports/department","/tasks/notifications"],"employee":["/tasks/received","/tasks/notifications"]}
+        for name,paths in expected.items():
+            client=self.app.test_client();self.login(name,client=client)
+            for path in paths:
+                response=client.get(path);self.assertEqual(200,response.status_code)
+                parser=NavigationLinks();parser.feed(response.get_data(as_text=True));self.assertEqual(paths,parser.links)
+                source=response.get_data(as_text=True)
+                self.assertNotIn('href="/admin/categories"',source);self.assertNotIn('href="/admin/settings"',source)
+                if name=="root":self.assertIn("Журнал действий",source)
+
+    def test_current_forms_follow_server_actions_and_have_required_comment_and_files(self):
+        from flask import template_rendered
+        from support.task_view_fixtures import Markup
+        ident=self.task(status="in_progress",assignee_id=self.ids["worker"])
+        for name in ("employee","head","worker","receiver-head","root"):
+            client=self.app.test_client();self.login(name,client=client);contexts=[]
+            def capture(sender,template,context,**kw):contexts.append(context)
+            with template_rendered.connected_to(capture,self.app):response=client.get(f"/tasks/{ident}")
+            source=response.get_data(as_text=True);ctx=contexts[-1];forms={f.get("action") for f in Markup(source).forms}
+            for action in ctx["task_actions"]:
+                self.assertIn(action["url"],forms);self.assertIn(f'id="{action["key"]}-comment"',source);self.assertIn(f'id="{action["key"]}-attachment"',source)
+            for retired in ("/approval/","/review/","/confirm","/execution/start","/clarification","Редактировать черновик"):
+                self.assertNotIn(retired,source)
+            if name=="root":self.assertFalse(any(a and a.startswith(f"/tasks/{ident}/") for a in forms))
+
+    def test_invalid_assignment_retains_input_and_links_inline_error(self):
+        ident=self.task();client=self.app.test_client();self.login("receiver-head",client=client)
+        response=client.post(f"/tasks/{ident}/assign",data=dict(revision=0,assignee_ids=["99999"],comment="Не потерять пояснение"))
+        self.assertEqual(400,response.status_code);source=response.get_data(as_text=True)
+        for text in ('href="#assign-assignee_ids"','id="assign-assignee_ids-error"','aria-invalid="true"','Не потерять пояснение','<details open>'):self.assertIn(text,source)
+
+    def test_whitespace_comment_has_linked_error_without_changing_task(self):
+        from app.extensions import db
+        from app.models import Task
+        ident=self.task();client=self.app.test_client();self.login("worker",client=client)
+        response=client.post(f"/tasks/{ident}/claim",data=dict(revision=0,comment="  "))
+        self.assertEqual(400,response.status_code);source=response.get_data(as_text=True)
+        self.assertIn('href="#claim-comment"',source);self.assertIn('id="claim-comment-error"',source)
+        with self.app.app_context():self.assertEqual(("new",0),(db.session.get(Task,ident).status,db.session.get(Task,ident).revision))
+
+    def test_invalid_deadline_keeps_value_comment_and_inline_error(self):
+        ident=self.task();client=self.app.test_client();self.login("head",client=client)
+        response=client.post(f"/tasks/{ident}/deadline",data=dict(revision=0,due_at="invalid",comment="Пояснение переноса"))
+        self.assertEqual(400,response.status_code);source=response.get_data(as_text=True)
+        self.assertIn('value="invalid"',source);self.assertIn('href="#deadline-due_at"',source);self.assertIn('id="deadline-due_at-error"',source);self.assertIn("Пояснение переноса",source)
+
+    def test_new_task_has_direct_send_and_optional_category_without_saved_draft(self):
+        client=self.app.test_client();self.login("employee",client=client)
+        source=client.get("/tasks/new").get_data(as_text=True)
+        for field in ('name="creation_key"','name="description"','name="category_id"','name="attachment"'):self.assertIn(field,source)
+        self.assertIn("Отправить задачу",source);self.assertNotIn('name="revision"',source);self.assertNotIn("Сохранить черновик",source)
+
+    def test_notification_copy_read_controls_and_unread_count(self):
+        from app.extensions import db
+        from app.models import TaskNotification
+        ident=self.task()
+        with self.app.app_context():
+            notification=TaskNotification(task_id=ident,user_id=self.ids["employee"],event_type="task_sent",message="Системное сообщение")
+            db.session.add(notification);db.session.commit();nid=notification.id
+        client=self.app.test_client();self.login("employee",client=client)
+        page=client.get("/tasks/notifications").get_data(as_text=True)
+        self.assertNotIn("согласования",page);self.assertIn("Непрочитанных уведомлений: 1",page);self.assertIn(f'/tasks/notifications/{nid}/read',page)
+        self.assertEqual(302,client.post(f"/tasks/notifications/{nid}/read").status_code)
+        self.assertIn("Непрочитанных уведомлений: 0",client.get("/tasks/notifications").get_data(as_text=True))
+
+    def test_creation_validation_marks_optional_fields_and_bad_file_without_losing_text(self):
+        from io import BytesIO
+        client=self.app.test_client();self.login("employee",client=client)
+        cases=(("priority","unknown"),("category_id","9999"),("contact_person","x"*161),("attachment",(BytesIO(b"not-a-pdf"),"bad.pdf")))
+        for field,value in cases:
+            payload=self.creation_form(client=client,title="Сохранить текст поручения",**{field:value})
+            response=client.post("/tasks/new",data=payload);self.assertEqual(400,response.status_code)
+            source=response.get_data(as_text=True)
+            for expected in (f'href="#{field}"',f'id="{field}-error"',f'aria-describedby="{field}-error"',"Сохранить текст поручения"):
+                self.assertIn(expected,source)

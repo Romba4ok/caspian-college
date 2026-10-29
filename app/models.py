@@ -1,5 +1,7 @@
 """Department workflow models, preserving historical teaching records."""
 
+from uuid import uuid4
+
 from flask_login import UserMixin
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, text
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -84,19 +86,7 @@ class Department(db.Model):
     members = db.relationship("User", back_populates="department")
 
 
-TASK_STATUSES = (
-    "draft",
-    "pending_approval",
-    "awaiting_assignment",
-    "assigned",
-    "in_progress",
-    "awaiting_clarification",
-    "recipient_review",
-    "sender_acceptance",
-    "completed",
-    "cancelled",
-    "rejected",
-)
+TASK_STATUSES = ("new", "in_progress", "completed", "cancelled", "rejected")
 TASK_PRIORITIES = ("low", "normal", "high", "urgent")
 
 
@@ -105,12 +95,16 @@ class Task(db.Model):
     __table_args__ = (
         CheckConstraint("priority IN ('low', 'normal', 'high', 'urgent')", name="ck_tasks_priority"),
         CheckConstraint(
-            "status IN ('draft', 'pending_approval', 'awaiting_assignment', 'assigned', 'in_progress', "
-            "'awaiting_clarification', 'recipient_review', 'sender_acceptance', 'completed', 'cancelled', 'rejected')",
+            "status IN ('new', 'in_progress', 'completed', 'cancelled', 'rejected')",
             name="ck_tasks_status",
         ),
         CheckConstraint("sender_department_id <> recipient_department_id", name="ck_tasks_distinct_departments"),
-        CheckConstraint("due_at IS NOT NULL OR (legacy_missing_due AND is_legacy_dispatched)", name="ck_tasks_due_required"),
+        CheckConstraint("due_at IS NOT NULL", name="ck_tasks_due_required"),
+        CheckConstraint("rework_cycle >= 0", name="ck_tasks_rework_cycle"),
+        CheckConstraint("length(trim(creation_key)) >= 32 AND length(creation_key) <= 64 "
+                        "AND length(trim(creation_key)) = length(creation_key)", name="ck_tasks_creation_key"),
+        CheckConstraint("assignee_id IS NULL", name="ck_tasks_legacy_assignee_unused"),
+        UniqueConstraint("creation_key", name="uq_tasks_creation_key"),
         CheckConstraint("revision >= 0", name="ck_tasks_revision"),
     )
 
@@ -124,16 +118,23 @@ class Task(db.Model):
     recipient_department_id = db.Column(
         db.Integer, db.ForeignKey("departments.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    assignee_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    due_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    # Only the request-free old-schema scheduler reads this deferred column.
+    # Schema 09 requires NULL; current assignments have exactly one source below.
+    legacy_assignee_id = db.deferred(db.Column("assignee_id", db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True))
+    due_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
     priority = db.Column(db.String(16), nullable=False, default="normal", server_default="normal")
     category = db.Column(db.String(80), nullable=True)
     contact_person = db.Column(db.String(160), nullable=True)
-    status = db.Column(db.String(32), nullable=False, default="draft", server_default="draft", index=True)
+    status = db.Column(db.String(32), nullable=False, default="new", server_default="new", index=True)
     # Keep additions deferred so the existing reminder reader can operate on the
     # old working schema until its separately approved upgrade. No read fallback
     # invents values; new services explicitly access these after migration.
-    sent_at = db.deferred(db.Column(db.DateTime(timezone=True), nullable=True))
+    sent_at = db.deferred(db.Column(db.DateTime(timezone=True), nullable=False))
+    # Deferred so historical revision-07 readers do not select revision-08 fields.
+    # This is read compatibility only, not permission to write the old workflow.
+    creation_key = db.deferred(db.Column(db.String(64), nullable=False, default=lambda: uuid4().hex))
+    is_rework = db.deferred(db.Column(db.Boolean, nullable=False, default=False, server_default=db.false()))
+    rework_cycle = db.deferred(db.Column(db.Integer, nullable=False, default=0, server_default="0"))
     completed_at = db.deferred(db.Column(db.DateTime(timezone=True), nullable=True))
     closed_at = db.deferred(db.Column(db.DateTime(timezone=True), nullable=True))
     revision = db.deferred(db.Column(db.Integer, nullable=False, default=0, server_default="0"))
@@ -146,11 +147,55 @@ class Task(db.Model):
     author = db.relationship("User", foreign_keys=[author_id], backref="authored_tasks")
     sender_department = db.relationship("Department", foreign_keys=[sender_department_id], backref="sent_tasks")
     recipient_department = db.relationship("Department", foreign_keys=[recipient_department_id], backref="received_tasks")
-    assignee = db.relationship("User", foreign_keys=[assignee_id], backref="assigned_tasks")
+    assignments = db.relationship("TaskAssignee", back_populates="task", cascade="all, delete-orphan",
+        order_by="TaskAssignee.user_id")
+
+    @property
+    def assignee_ids(self):
+        return sorted(member.user_id if member.user_id is not None else member.user.id for member in self.assignments)
+
+    @assignee_ids.setter
+    def assignee_ids(self, ids):
+        previous = {member.user_id: member for member in self.assignments}
+        self.assignments = [previous.get(ident) or TaskAssignee(user_id=ident) for ident in sorted(ids)]
+
+    @property
+    def assignees(self):
+        return [member.user for member in self.assignments]
+
+    # Internal single-member construction/read compatibility for existing callers.
+    # Never selects a first member of a team and never reads the old SQL column.
+    @property
+    def assignee(self):
+        if len(self.assignments) > 1:
+            raise ValueError("Use assignees for a task with multiple participants")
+        return self.assignments[0].user if self.assignments else None
+
+    @assignee.setter
+    def assignee(self, user):
+        self.assignments = [] if user is None else [TaskAssignee(user=user)]
+
+    @property
+    def assignee_id(self):
+        if len(self.assignments) > 1:
+            raise ValueError("Use assignee_ids for a task with multiple participants")
+        return self.assignee_ids[0] if self.assignments else None
+
+    @assignee_id.setter
+    def assignee_id(self, ident):
+        self.assignee_ids = [] if ident is None else [ident]
     comments = db.relationship("TaskComment", back_populates="task", cascade="all, delete-orphan", order_by="(TaskComment.created_at, TaskComment.id)")
     attachments = db.relationship("TaskAttachment", back_populates="task", cascade="all, delete-orphan")
     events = db.relationship("TaskEvent", back_populates="task", cascade="all, delete-orphan", order_by="(TaskEvent.created_at, TaskEvent.id)")
     notifications = db.relationship("TaskNotification", back_populates="task", cascade="all, delete-orphan")
+
+
+class TaskAssignee(db.Model):
+    __tablename__ = "task_assignees"
+    task_id = db.Column(db.Integer, db.ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True, index=True)
+    task = db.relationship("Task", back_populates="assignments")
+    user = db.relationship("User")
 
 
 class TaskComment(db.Model):
@@ -273,3 +318,10 @@ class AdminAuditEvent(db.Model):
     object_id = db.Column(db.Integer, nullable=True)
     details = db.Column(db.JSON, nullable=False, default=dict)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
+
+
+# create_all is only used by synthetic fixtures; production uses migration 09.
+from sqlalchemy import event as _schema_event
+from .assignment_schema import install_guards as _install_assignment_guards
+_schema_event.listen(TaskAssignee.__table__, "after_create",
+    lambda table, connection, **kw: _install_assignment_guards(connection))

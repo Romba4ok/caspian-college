@@ -24,6 +24,7 @@
       </label>
     {% endif %}
     {% if user %}<label>Новый пароль <span class="hint">Оставьте пустым, чтобы сохранить текущий пароль.</span><input name="password" type="password" autocomplete="new-password"></label>{% else %}<label>Пароль<input name="password" type="password" autocomplete="new-password" required></label>{% endif %}
+    {% if user %}<p class="hint">Смена пароля завершает прежние сеансы пользователя. Доступ отключённой учётной записи восстанавливается отдельным действием.</p>{% endif %}
     <div class="actions"><button>Сохранить</button><a href="{{ url_for('admin.admin_users') }}">Отмена</a></div>
   </form>
 </section>

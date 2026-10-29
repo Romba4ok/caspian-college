@@ -260,8 +260,8 @@ td.actions { display:flex; min-width:240px; gap:10px; align-items:center; }
 .board-card[draggable=true] { cursor:grab; }
 .board-card[draggable=true]:active { cursor:grabbing; }
 @media(min-width:600px) { .task-board { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media(min-width:1000px) { .task-board { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-@media(min-width:1300px) { .task-board { grid-template-columns:repeat(5,minmax(0,1fr)); } }
+@media(min-width:1000px) { .task-board { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(min-width:1300px) { .task-board { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:999px) { .board-card-actions>.button { min-height:44px; } }
 .board-drag-source { opacity:.65; }
 .board-drop-allowed { border-style:dashed; border-color:var(--accent); }

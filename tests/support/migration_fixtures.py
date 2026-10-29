@@ -45,3 +45,76 @@ def fill_legacy(bind):
     bind.execute(t["task_translations"].insert().values(source_type="task", source_id=1, source_hash="original-hash",
         target_language="en", translated_text="Preserved historical translation"))
     return {"users": ids, "departments": depts, "group": gid, "comment": comment_id}
+
+
+class MigrationDatabase:
+    """Isolated file/schema for actual Alembic upgrades, never TESTING create_all."""
+    postgres = False
+
+    def setUp(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from uuid import uuid4
+        from app import create_app
+        self.temp = tempfile.TemporaryDirectory(prefix="portal_case_")
+        self.control = None
+        config = {"TESTING": False, "SECRET_KEY": "synthetic-test-key",
+            "ADMIN_USERNAME": "migration-admin", "ADMIN_PASSWORD": "synthetic-test-password",
+            "WTF_CSRF_ENABLED": False, "TASK_UPLOAD_DIR": str(Path(self.temp.name) / "uploads")}
+        if self.postgres:
+            self.schema = "portal_case_" + uuid4().hex
+            self.control = sa.create_engine(os.environ["PORTAL_TEST_DATABASE_URL"])
+            with self.control.begin() as conn:
+                conn.execute(sa.text(f'CREATE SCHEMA "{self.schema}"'))
+            config.update(DATABASE=os.environ["PORTAL_TEST_DATABASE_URL"],
+                SQLALCHEMY_ENGINE_OPTIONS={"connect_args": {"options": f"-csearch_path={self.schema}"}})
+        else:
+            config["DATABASE"] = "sqlite:///" + str(Path(self.temp.name) / "case.sqlite3").replace("\\", "/")
+        self.app = create_app(config)
+        self.ctx = self.app.app_context()
+        self.ctx.push()
+
+    def tearDown(self):
+        from app.extensions import db
+        db.session.remove()
+        db.engine.dispose()
+        self.ctx.pop()
+        if self.control is not None:
+            with self.control.begin() as conn:
+                conn.execute(sa.text(f'DROP SCHEMA "{self.schema}" CASCADE'))
+            self.control.dispose()
+        self.temp.cleanup()
+
+    def upgrade(self, revision="head"):
+        result = self.app.test_cli_runner().invoke(args=["db", "upgrade", revision], catch_exceptions=False)
+        self.assertEqual(0, result.exit_code, result.output)
+
+    def table(self, name):
+        from app.extensions import db
+        return sa.Table(name, sa.MetaData(), autoload_with=db.engine)
+
+    def rows(self, name):
+        from app.extensions import db
+        table = self.table(name)
+        with db.engine.connect() as conn:
+            order = list(table.primary_key.columns)
+            return [dict(row) for row in conn.execute(sa.select(table).order_by(*order)).mappings()]
+
+
+    def database_snapshot(self):
+        """Exact synthetic rows and structural metadata for read-only assertions."""
+        from app.extensions import db
+        inspector=sa.inspect(db.engine)
+        names=sorted(inspector.get_table_names())
+        from sqlalchemy.sql.elements import ClauseElement
+        def stable(value):
+            if isinstance(value,ClauseElement):return str(value)
+            if isinstance(value,dict):return {k:stable(v) for k,v in value.items()}
+            if isinstance(value,list):return [stable(v) for v in value]
+            return value
+        return stable({name: dict(rows=self.rows(name),
+            columns=[(c["name"],str(c["type"]),c["nullable"],str(c["default"])) for c in inspector.get_columns(name)],
+            checks=inspector.get_check_constraints(name),
+            foreign_keys=inspector.get_foreign_keys(name),
+            unique=inspector.get_unique_constraints(name),indexes=inspector.get_indexes(name)) for name in names})

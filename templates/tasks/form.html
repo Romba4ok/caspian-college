@@ -1,71 +1,69 @@
 {% extends 'base.html' %}
-{% set editing = task is not none %}
-{% block title %}{{ 'Редактировать черновик' if editing else 'Новый черновик' }} · Задачи{% endblock %}
+{% block title %}Новая задача · Задачи{% endblock %}
 {% block content %}
 <div class="page-heading">
   <div><p class="hint">Отдел: {{ current_user.department.name }}</p>
-    <h1>{{ 'Редактирование черновика' if editing else 'Новый черновик' }}</h1>
-    <p>Сохранение не отправляет задачу. До отправки её видят только ваш отдел и администратор.</p>
+    <h1>Новая задача</h1>
+    <p>После отправки задача сразу появится у другого отдела в статусе «Новая».</p>
   </div>
-  <a href="{{ url_for('tasks.task_detail', task_id=task.id) if editing else url_for('tasks.sent_tasks') }}">Назад</a>
+  <a href="{{ url_for('tasks.sent_tasks') }}">Назад</a>
 </div>
 {% macro error_for(field) %}{% if form_error and error_field == field %}<span class="hint" id="{{ field }}-error" role="alert">{{ form_error }}</span>{% endif %}{% endmacro %}
 <section class="card form-card wide task-form-card">
   {% if form_error %}
   <div class="flash error" role="alert" tabindex="-1" autofocus>
-    <h2>Проверьте черновик</h2><p>{{ form_error }}</p>
-    {% if error_field %}<a href="#{{ error_field }}">Перейти к полю</a>{% endif %}
-    <p>Данные не сохранены. При конфликте откройте карточку заново и проверьте актуальную версию.</p>
+    <h2>Проверьте задачу</h2><p>{{ form_error }}</p>
+    {% if error_field and error_field != "creation_key" %}<a href="#{{ error_field }}">Перейти к полю</a>{% endif %}
+    <p>При ошибке данные не сохраняются. При конфликте отправки проверьте уже созданную задачу; для другого поручения откройте новую форму.</p>
   </div>
   {% endif %}
   <form method="post" enctype="multipart/form-data" class="form-stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    {% if editing %}<input type="hidden" name="revision" value="{{ request.form.get('revision', task.revision) }}">{% endif %}
+    <input type="hidden" name="creation_key" value="{{ creation_key }}">
+
     <label for="recipient_department_id">Отдел-получатель <span class="hint">Обязательно</span></label>
     <select id="recipient_department_id" name="recipient_department_id" required {% if form_error and error_field == "recipient_department_id" %}aria-invalid="true" aria-describedby="recipient_department_id-error"{% endif %}>
       <option value="">Выберите отдел</option>
-      {% set chosen = request.form.get('recipient_department_id', task.recipient_department_id|string if editing else '') %}
+      {% set chosen = request.form.get('recipient_department_id', '') %}
       {% for department in departments %}<option value="{{ department.id }}" {% if chosen == department.id|string %}selected{% endif %}>{{ department.name }}</option>{% endfor %}
     </select>{{ error_for('recipient_department_id') }}
     <label for="title">Название <span class="hint">Обязательно</span></label>
-    <input id="title" name="title" maxlength="200" required value="{{ request.form.get('title', task.title if editing else '') }}" {% if form_error and error_field == "title" %}aria-invalid="true" aria-describedby="title-error"{% endif %}>
+    <input id="title" name="title" maxlength="200" required value="{{ request.form.get('title', '') }}" {% if form_error and error_field == "title" %}aria-invalid="true" aria-describedby="title-error"{% endif %}>
     {{ error_for('title') }}
     <label for="description">Описание <span class="hint">Обязательно</span></label>
-    <textarea id="description" name="description" rows="7" required aria-describedby="description-help{% if form_error and error_field == 'description' %} description-error{% endif %}" {% if form_error and error_field == 'description' %}aria-invalid="true"{% endif %}>{{ request.form.get('description', task.description if editing else '') }}</textarea>
+    <textarea id="description" name="description" rows="7" required aria-describedby="description-help{% if form_error and error_field == 'description' %} description-error{% endif %}" {% if form_error and error_field == 'description' %}aria-invalid="true"{% endif %}>{{ request.form.get('description', '') }}</textarea>
     {{ error_for('description') }}<p class="hint" id="description-help">При создании описание также сохраняется первым комментарием.</p>
     <div class="task-form-grid">
       <label for="priority">Приоритет
-        <select id="priority" name="priority">{% for key, label in priority_labels.items() %}<option value="{{ key }}" {% if request.form.get('priority', task.priority if editing else 'normal') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+        <select id="priority" name="priority" {% if form_error and error_field == "priority" %}aria-invalid="true" aria-describedby="priority-error"{% endif %}>{% for key, label in priority_labels.items() %}<option value="{{ key }}" {% if request.form.get('priority', 'normal') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
         {{ error_for('priority') }}
       </label>
       <label for="due_at">Срок выполнения <span class="hint">Обязательно; {{ config.TASK_TIMEZONE }}</span>
-        <input id="due_at" type="datetime-local" name="due_at" required value="{{ request.form.get('due_at', task.due_at|task_datetime('%Y-%m-%dT%H:%M') if editing and task.due_at else '') }}" {% if form_error and error_field == "due_at" %}aria-invalid="true" aria-describedby="due_at-error"{% endif %}>
+        <input id="due_at" type="datetime-local" name="due_at" required value="{{ request.form.get('due_at', '') }}" {% if form_error and error_field == "due_at" %}aria-invalid="true" aria-describedby="due_at-error"{% endif %}>
         {{ error_for('due_at') }}
       </label>
     </div>
     <div class="task-form-grid">
       <label for="category_id">Категория <span class="hint">Необязательно</span>
-        <select id="category_id" name="category_id">
+        <select id="category_id" name="category_id" {% if form_error and error_field == "category_id" %}aria-invalid="true" aria-describedby="category_id-error"{% endif %}>
           <option value="">Без категории</option>
-          {% for category in categories %}<option value="{{ category.id }}" {% if request.form.get('category_id', task.category_id|string if editing and task.category_id else '') == category.id|string %}selected{% endif %}>{{ category.name }}</option>{% endfor %}
+          {% for category in categories %}<option value="{{ category.id }}" {% if request.form.get('category_id', '') == category.id|string %}selected{% endif %}>{{ category.name }}</option>{% endfor %}
         </select>{{ error_for('category_id') }}
       </label>
       <label for="contact_person">Контактное лицо <span class="hint">Необязательно</span>
-        <input id="contact_person" name="contact_person" maxlength="160" value="{{ request.form.get('contact_person', task.contact_person or '' if editing else '') }}">
+        <input id="contact_person" name="contact_person" maxlength="160" {% if form_error and error_field == "contact_person" %}aria-invalid="true" aria-describedby="contact_person-error"{% endif %} value="{{ request.form.get('contact_person', '') }}">
         {{ error_for('contact_person') }}
       </label>
     </div>
-    <p class="hint">После отправки одного исполнителя назначит начальник отдела-получателя.</p>
-    {% if editing %}
-    <label for="comment">Комментарий к изменениям <span class="hint">Обязательно</span></label>
-    <textarea id="comment" name="comment" rows="3" required>{{ request.form.get('comment', '') }}</textarea>
-    {% endif %}
+    <p class="hint">Начальник получателя назначит исполнителя, либо сотрудник отдела сам возьмёт свободную задачу.</p>
+
     {% if upload_policy and upload_policy.allowed_extensions %}
     <label for="attachment">Файлы к комментарию <span class="hint">Необязательно</span></label>
-    <input id="attachment" type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
+    <input id="attachment" type="file" name="attachment" multiple {% if form_error and error_field == "attachment" %}aria-invalid="true" aria-describedby="attachment-error"{% endif %} accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
+    {{ error_for('attachment') }}
     <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл; весь запрос — до 21 МБ. Можно выбрать несколько файлов. Остальные материалы добавьте следующим комментарием. После ошибки выберите файл повторно.</p>
-    {% else %}<p class="hint">Новые вложения отключены настройками системы.</p>{% endif %}
-    <div class="actions task-form-actions"><button type="submit">{{ 'Сохранить изменения черновика' if editing else 'Сохранить черновик' }}</button><a href="{{ url_for('tasks.task_detail', task_id=task.id) if editing else url_for('tasks.sent_tasks') }}">Отмена</a></div>
+    {% endif %}
+    <div class="actions task-form-actions"><button type="submit">Отправить задачу</button><a href="{{ url_for('tasks.sent_tasks') }}">Отмена</a></div>
   </form>
 </section>
 {% endblock %}

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Журнал действий · Платформа отделов{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="hint">Просмотр администратора</p><h1>Журнал действий</h1><p>Действия по задачам и административные изменения в общей хронологии. Имена, роли и отделы сохранены на момент события.</p></div></div>
+<div class="page-heading"><div><p class="hint">Просмотр администратора</p><h1>Журнал действий</h1><p>Действия по задачам и административные изменения в общей хронологии. Имена, роли и отделы сохранены на момент события. Операции начальников над сотрудниками включены; административным изменениям дано системное пояснение.</p></div></div>
 <form method="get" action="{{ url_for('admin.admin_audit') }}" class="card audit-filters" aria-label="Фильтры журнала">
   {% if error %}<p class="message error audit-filter-error" id="audit-error" role="alert">{{ error }}</p>{% endif %}
   <div><label for="audit-user">Инициатор</label><select id="audit-user" name="user_id" {% if error and error_field == 'user_id' %}aria-invalid="true" aria-describedby="audit-error"{% endif %}>

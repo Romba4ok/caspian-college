@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 from threading import Barrier
 from unittest.mock import patch
 
-from sqlalchemy import create_engine, text, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import create_engine, text, update, bindparam
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from uuid import uuid4
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -16,8 +16,8 @@ from app import create_app
 from app.extensions import db
 from app.models import Department, Task, TaskComment, TaskEvent, TaskNotification, User
 from app.reminders import run_task_reminders
-from app.workflow import (WorkflowError, cancel_task, change_task_deadline, confirm_task_result,
-    reject_task, reassign_task, forward_task_result, return_task_for_revision)
+from app.workflow import (WorkflowError, cancel_task, change_task_deadline, complete_task,
+    reject_task, reassign_task, return_task_for_revision)
 
 
 UTC = timezone.utc
@@ -68,6 +68,7 @@ class TaskReminderTests(unittest.TestCase):
             author_id=self.author.id, sender_department_id=self.sender_id, recipient_department_id=self.receiver_id,
             assignee_id=self.worker.id, status=status, due_at=self.due_at if due_at == "default" else due_at,
             sent_at=datetime(2026, 11, 1, tzinfo=UTC), created_at=datetime(2026, 11, 1, tzinfo=UTC), revision=1)
+        if status=="new":values["assignee_id"]=None
         task = Task(**(values | changes))
         db.session.add(task)
         db.session.commit()
@@ -103,19 +104,12 @@ class TaskReminderTests(unittest.TestCase):
         self.assertEqual(20, self.reminders().count())
         self.assertEqual(20, len({n.deduplication_key for n in self.reminders().all()}))
 
-    def test_exact_recipients_for_every_active_stage(self):
-        a = {self.author.id}; r = {self.receiver_head.id, self.receiver_head_two.id}
-        for status, expected in (
-            ("awaiting_assignment", a | r), ("assigned", a | r | {self.worker.id}),
-            ("in_progress", a | r | {self.worker.id}), ("recipient_review", a | r | {self.worker.id}),
-            ("awaiting_clarification", a | r | {self.worker.id, self.sender_head.id}),
-            ("sender_acceptance", a | {self.sender_head.id}),
-        ):
-            with self.subTest(status=status):
-                task = self.task(status=status)
-                self.assertEqual(len(expected), self.run_at(self.now))
-                self.assertEqual(expected, self.owners(task))
-                self.assertEqual(0, self.run_at(self.now))
+    def test_exact_recipients_for_both_active_statuses(self):
+        for status in ("new","in_progress"):
+            task=self.task(status=status)
+            expected={self.author.id,self.receiver_head.id,self.receiver_head_two.id}|({self.worker.id} if status=="in_progress" else set())
+            self.assertEqual(len(expected),self.run_at(self.now))
+            self.assertEqual(expected,self.owners(task));self.assertEqual(0,self.run_at(self.now))
 
     def test_late_run_never_backfills_missed_intervals(self):
         self.task()
@@ -125,49 +119,41 @@ class TaskReminderTests(unittest.TestCase):
         self.assertEqual({datetime(2026, 11, 11).date(), datetime(2026, 11, 13).date()},
                          {n.created_at.date() for n in self.reminders().all()})
 
-    def test_only_dispatched_active_tasks_with_a_real_deadline_are_selected(self):
-        self.task(due_at=None, legacy_missing_due=True, is_legacy_dispatched=True)
-        for status in ("draft", "pending_approval", "completed", "cancelled", "rejected"):
-            self.task(status=status)
-        self.task(sent_at=None, is_legacy_dispatched=False)
-        self.task(sent_at=self.now + timedelta(hours=1))
-        self.task(created_at=self.now + timedelta(hours=1))
-        self.task(due_at=self.due_at + timedelta(days=1))
-        self.assertEqual(0, self.run_at(self.now))
-        self.assertEqual(0, self.reminders().count())
+    def test_only_dispatched_current_active_tasks_in_current_slot_are_selected(self):
+        for status in ("completed","cancelled","rejected"):self.task(status=status)
+        self.task(sent_at=self.now+timedelta(hours=1))
+        self.task(created_at=self.now+timedelta(hours=1))
+        self.task(due_at=self.due_at+timedelta(days=1))
+        self.assertEqual(0,self.run_at(self.now));self.assertEqual(0,self.reminders().count())
 
-    def test_presend_legacy_flag_does_not_leak_reminders(self):
-        for status in ("draft", "pending_approval"):
-            self.task(status=status, is_legacy_dispatched=True)
-        self.assertEqual(0, self.run_at(self.now))
+    def test_retired_presend_states_are_rejected_even_with_legacy_flag(self):
+        for status in ("draft","pending_approval"):
+            with self.assertRaises(IntegrityError):self.task(status=status,is_legacy_dispatched=True)
+            db.session.rollback()
+        self.assertEqual(0,self.run_at(self.now))
 
-    def test_historical_dispatched_task_without_known_send_date_is_included(self):
-        self.task(sent_at=None, is_legacy_dispatched=True)
-        self.assertEqual(4, self.run_at(self.now))
-        self.assertEqual(self.work_owners(), self.owners())
+    def test_new_tasks_cannot_omit_send_date_or_mandatory_deadline(self):
+        for fields in ({"sent_at":None,"is_legacy_dispatched":True},{"due_at":None,"legacy_missing_due":True}):
+            with self.assertRaises(IntegrityError):self.task(**fields)
+            db.session.rollback()
+        self.assertEqual(0,self.run_at(self.now))
 
     def test_archived_departments_keep_reminders_for_old_dispatched_tasks(self):
         self.task()
         for ident in (self.sender_id, self.receiver_id):
             db.session.get(Department, ident).is_archived = True
-        self.task(status="draft", sent_at=None)
         db.session.commit()
         self.assertEqual(4, self.run_at(self.now))
         self.assertEqual(self.work_owners(), self.owners())
 
     def test_completion_cancellation_and_rejection_stop_future_reminders(self):
-        for action in ("complete", "cancel", "reject"):
-            task = self.task(status="sender_acceptance" if action == "complete" else "assigned")
-            self.assertEqual(2 if action == "complete" else 4, self.run_at(self.now))
-            kwargs = dict(task=task, expected_revision=task.revision, comment="Проверено ответственным")
-            if action == "complete":
-                confirm_task_result(actor=self.sender_head, **kwargs)
-            elif action == "cancel":
-                cancel_task(actor=self.sender_head, **kwargs)
-            else:
-                reject_task(actor=self.receiver_head, **kwargs)
+        for action in ("complete","cancel","reject"):
+            task=self.task()
+            self.assertEqual(4,self.run_at(self.now))
+            method,actor={"complete":(complete_task,self.worker),"cancel":(cancel_task,self.sender_head),"reject":(reject_task,self.receiver_head)}[action]
+            method(task=task,actor=actor,expected_revision=task.revision,comment="Причина действия")
             db.session.commit()
-            self.assertEqual(0, self.run_at(self.now + timedelta(days=1)))
+            self.assertEqual(0,self.run_at(self.now+timedelta(days=1)))
 
     def test_deadline_rescheduling_recalculates_only_current_slot_and_cannot_remove(self):
         task = self.task()
@@ -190,14 +176,16 @@ class TaskReminderTests(unittest.TestCase):
         self.assertEqual(0, self.run_at(self.now))
         self.assertEqual(8, self.reminders().count())
 
-    def test_fill_historical_missing_deadline_starts_current_slot_only(self):
-        task = self.task(due_at=None, sent_at=None, is_legacy_dispatched=True, legacy_missing_due=True)
-        self.assertEqual(0, self.run_at(self.now + timedelta(days=3)))
-        change_task_deadline(task=task, actor=self.sender_head, due_at=self.due_at,
-            expected_revision=task.revision, comment="Восстановлен достоверный срок")
+    def test_return_after_missed_days_sends_current_overdue_slot_only(self):
+        task=self.task()
+        complete_task(task=task,actor=self.worker,expected_revision=task.revision,comment="Результат")
         db.session.commit()
-        self.assertEqual(4, self.run_at(self.now + timedelta(days=3)))
-        self.assertEqual({"reminder_overdue"}, {n.event_type for n in self.reminders().all()})
+        self.assertEqual(0,self.run_at(self.now+timedelta(days=3)))
+        return_task_for_revision(task=task,actor=self.sender_head,expected_revision=task.revision,comment="Доработать")
+        db.session.commit()
+        self.assertEqual(4,self.run_at(self.now+timedelta(days=5)))
+        self.assertEqual({"reminder_overdue"},{n.event_type for n in self.reminders()})
+        self.assertEqual(0,self.run_at(self.now+timedelta(days=5)))
 
     def test_same_day_deadline_change_allows_new_slot_but_not_duplicates(self):
         task = self.task()
@@ -231,27 +219,25 @@ class TaskReminderTests(unittest.TestCase):
     def test_new_assignee_receives_today_slot_without_duplicating_others(self):
         task = self.task()
         self.assertEqual(4, self.run_at(self.now))
-        reassign_task(task=task, actor=self.receiver_head, assignee_id=self.replacement.id,
+        reassign_task(task=task, actor=self.receiver_head, assignee_ids=[self.replacement.id],
             expected_revision=task.revision, comment="Замена исполнителя")
         db.session.commit()
         self.assertEqual(1, self.run_at(self.now))
         self.assertEqual(self.replacement.id, self.reminders().all()[-1].user_id)
         self.assertEqual(0, self.run_at(self.now))
 
-    def test_stage_change_only_notifies_new_owners_without_resending_old_ones(self):
-        task = self.task(status="recipient_review")
-        self.assertEqual(4, self.run_at(self.now))
-        forward_task_result(task=task, actor=self.receiver_head,
-            expected_revision=task.revision, comment="Проверено, передать отправителю")
-        db.session.commit()
-        self.assertEqual(1, self.run_at(self.now))
-        self.assertEqual(self.sender_head.id, self.reminders().all()[-1].user_id)
-        return_task_for_revision(task=task, actor=self.sender_head,
-            expected_revision=task.revision, comment="Дополнить результат")
-        db.session.commit()
-        self.assertEqual(0, self.run_at(self.now))
-        self.assertEqual(4, self.run_at(self.now + timedelta(days=1)))
-        self.assertEqual(self.work_owners(), {n.user_id for n in self.reminders().all()[-4:]})
+    def test_each_rework_cycle_reopens_same_day_reminders_once(self):
+        task=self.task();self.assertEqual(4,self.run_at(self.now))
+        keys={n.deduplication_key for n in self.reminders()}
+        for cycle in (1,2):
+            complete_task(task=task,actor=self.worker,expected_revision=task.revision,comment="Результат")
+            db.session.commit();self.assertEqual(0,self.run_at(self.now))
+            return_task_for_revision(task=task,actor=self.sender_head,expected_revision=task.revision,comment="Доработать")
+            db.session.commit();self.assertEqual(cycle,task.rework_cycle)
+            self.assertEqual(4,self.run_at(self.now));self.assertEqual(0,self.run_at(self.now))
+            current={n.deduplication_key for n in self.reminders()}
+            self.assertEqual(4,len(current-keys));keys=current
+        self.assertEqual(12,self.reminders().count())
 
     def test_overlapping_author_executor_head_get_one_record_each(self):
         task = self.task(author_id=self.receiver_head.id, assignee_id=self.receiver_head.id)
@@ -311,19 +297,21 @@ class TaskReminderTests(unittest.TestCase):
         self.assertEqual(4, self.run_at(self.now))
 
     def test_task_changed_after_selection_is_skipped_until_next_run(self):
-        task = self.task()
+        task=self.task()
         from app import reminders
-        original = reminders._lock_reminder_task
-        def changed(candidate):
-            db.session.execute(update(Task).where(Task.id == candidate.id).values(
-                status="sender_acceptance", revision=candidate.revision + 1).execution_options(synchronize_session=False))
-            return original(candidate)
-        with patch("app.reminders._lock_reminder_task", side_effect=changed):
-            self.assertEqual(0, self.run_at(self.now))
+        original=reminders._lock_reminder_task
+        def changed(candidate, **kwargs):
+            from app.models import TaskAssignee
+            from sqlalchemy import delete, insert
+            db.session.execute(delete(TaskAssignee).where(TaskAssignee.task_id==candidate.id))
+            db.session.execute(insert(TaskAssignee).values(task_id=candidate.id,user_id=self.replacement.id))
+            db.session.execute(update(Task).where(Task.id==candidate.id).values(
+                revision=candidate.revision+1).execution_options(synchronize_session=False))
+            return original(candidate, **kwargs)
+        with patch("app.reminders._lock_reminder_task",side_effect=changed):self.assertEqual(0,self.run_at(self.now))
         db.session.expire_all()
-        self.assertEqual("sender_acceptance", task.status)
-        self.assertEqual(2, self.run_at(self.now))
-        self.assertEqual({self.author.id, self.sender_head.id}, self.owners(task))
+        self.assertEqual(4,self.run_at(self.now))
+        self.assertEqual((self.work_owners()-{self.worker.id})|{self.replacement.id},self.owners(task))
 
     def test_reminders_do_not_change_revision_dates_comments_or_history(self):
         task = self.task()
@@ -334,19 +322,18 @@ class TaskReminderTests(unittest.TestCase):
         self.assertEqual(0, TaskComment.query.count())
         self.assertEqual(0, TaskEvent.query.count())
 
-    def test_preupgrade_deduplication_key_is_preserved(self):
+    def test_current_key_includes_namespace_cycle_deadline_user_day_and_kind(self):
         from hashlib import sha256
-        task = self.task()
-        raw = f"{task.id}|{self.author.id}|{self.due_at.isoformat()}|2026-11-08|reminder_two_days"
-        db.session.add(TaskNotification(task_id=task.id, user_id=self.author.id, event_type="reminder_two_days",
-            message="Сохранённое прежнее напоминание", deduplication_key=sha256(raw.encode()).hexdigest()))
+        task=self.task()
+        raw=f"task-reminder:v2|0|{task.id}|{self.author.id}|{self.due_at.isoformat()}|2026-11-08|reminder_two_days"
+        db.session.add(TaskNotification(task_id=task.id,user_id=self.author.id,event_type="reminder_two_days",
+            message="Уже доставлено",deduplication_key=sha256(raw.encode()).hexdigest()))
         db.session.commit()
-        self.assertEqual(3, self.run_at(self.now))
-        self.assertEqual(4, self.reminders().count())
+        self.assertEqual(3,self.run_at(self.now));self.assertEqual(4,self.reminders().count())
 
     def test_concurrent_sqlite_jobs_do_not_duplicate_daily_delivery(self):
         self.task()
-        self.task(status="sender_acceptance")
+        self.task(status="new")
         barrier = Barrier(2)
         def run_job(_):
             with self.app.app_context():
@@ -360,16 +347,15 @@ class TaskReminderTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(run_job, range(2)))
         db.session.expire_all()
-        self.assertEqual(6, sum(results))
-        self.assertEqual(6, self.reminders().count())
+        self.assertEqual(7, sum(results))
+        self.assertEqual(7, self.reminders().count())
 
 
 @unittest.skipUnless(os.environ.get("PORTAL_TEST_DATABASE_URL"), "Требуется безопасный runner PostgreSQL")
 class PostgreSQLReminderTests(unittest.TestCase):
     """Native timezone, locks and rollback on a schema in the disposable runner DB.
 
-    These are sequential integration checks; synchronized workflow races belong
-    to T016 and are not claimed by this class.
+    Calendar, rollback and synchronized delivery/workflow races use disposable schemas.
     """
     def setUp(self):
         self.schema = "portal_case_" + uuid4().hex
@@ -412,31 +398,65 @@ class PostgreSQLReminderTests(unittest.TestCase):
         db.session.commit()
         return task
 
-    def test_new_schema_batch_calendar_stage_and_idempotent_delivery(self):
-        first = self.task(datetime(2030, 1, 10, 20, tzinfo=UTC), status="recipient_review")  # 11 Jan 01:00
-        second = self.task(datetime(2030, 1, 10, 18, 59, tzinfo=UTC))  # 10 Jan 23:59
-        self.assertEqual(8, run_task_reminders(now=self.now))
-        db.session.commit()
-        self.assertEqual(0, run_task_reminders(now=self.now))
-        notes = TaskNotification.query.filter_by(task_id=first.id).all()
-        self.assertEqual({"reminder_one_day"}, {n.event_type for n in notes})
-        self.assertEqual({self.people[n].id for n in ("author", "worker", "receiver-head", "receiver-head-two")},
-                         {n.user_id for n in notes})
+    def test_new_schema_batch_calendar_completion_and_rework(self):
+        first=self.task(datetime(2030,1,10,20,tzinfo=UTC))
+        second=self.task(datetime(2030,1,10,18,59,tzinfo=UTC))
+        self.assertEqual(8,run_task_reminders(now=self.now));db.session.commit()
+        self.assertEqual(0,run_task_reminders(now=self.now))
+        notes=TaskNotification.query.filter_by(task_id=first.id).all()
+        self.assertEqual({"reminder_one_day"},{n.event_type for n in notes})
         self.assertTrue(all("11.01.2030 01:00" in n.message for n in notes))
-        self.assertEqual({"reminder_due_today"}, {n.event_type for n in TaskNotification.query.filter_by(task_id=second.id)})
-        forward_task_result(task=first, actor=self.people["receiver-head"], expected_revision=first.revision,
-            comment="Результат проверен")
+        self.assertEqual({"reminder_due_today"},{n.event_type for n in TaskNotification.query.filter_by(task_id=second.id)})
+        complete_task(task=first,actor=self.people["worker"],expected_revision=first.revision,comment="Результат")
+        db.session.commit();self.assertEqual(0,run_task_reminders(now=self.now))
+        return_task_for_revision(task=first,actor=self.people["sender-head"],expected_revision=first.revision,comment="Доработать")
+        db.session.commit();self.assertEqual(4,run_task_reminders(now=self.now));db.session.commit()
+        self.assertEqual(0,run_task_reminders(now=self.now))
+        self.assertEqual(8,run_task_reminders(now=self.now+timedelta(days=1)));db.session.commit()
+        self.assertEqual(0,run_task_reminders(now=self.now+timedelta(days=1)))
+
+    def concurrent(self,task,operations):
+        barrier=Barrier(2);ident=task.id;ids={name:user.id for name,user in self.people.items()}
+        def work(operation):
+            with self.app.app_context():
+                candidate=db.session.get(Task,ident)
+                actor=db.session.get(User,ids["sender-head" if operation=="return" else "worker"])
+                barrier.wait(timeout=10)
+                try:
+                    if operation=="job":result=run_task_reminders(now=self.now)
+                    else:
+                        method=return_task_for_revision if operation=="return" else complete_task
+                        method(task=candidate,actor=actor,expected_revision=candidate.revision,comment="Required")
+                        result=0
+                    db.session.commit();return result
+                finally:db.session.remove()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            values=[f.result(timeout=30) for f in [pool.submit(work,op) for op in operations]]
+        db.session.expire_all();return values
+
+    def test_native_parallel_jobs_create_one_daily_delivery(self):
+        task=self.task(self.now+timedelta(days=1))
+        self.assertEqual(4,sum(self.concurrent(task,("job","job"))))
+        self.assertEqual(4,TaskNotification.query.filter(TaskNotification.event_type.like("reminder_%")).count())
+        self.assertEqual(0,run_task_reminders(now=self.now))
+
+    def test_native_job_and_completion_stop_future_deliveries(self):
+        task=self.task(self.now+timedelta(days=1))
+        values=self.concurrent(task,("job","complete"))
+        self.assertIn(sum(values),(0,4))
+        self.assertEqual("completed",db.session.get(Task,task.id).status)
+        self.assertEqual(0,run_task_reminders(now=self.now+timedelta(days=1)))
+
+    def test_native_job_and_return_use_current_cycle_once(self):
+        task=self.task(self.now+timedelta(days=1))
+        complete_task(task=task,actor=self.people["worker"],expected_revision=task.revision,comment="Результат")
         db.session.commit()
-        self.assertEqual(1, run_task_reminders(now=self.now))
-        db.session.commit()
-        self.assertEqual(6, run_task_reminders(now=self.now + timedelta(days=1)))
-        db.session.commit()
-        self.assertEqual(0, run_task_reminders(now=self.now + timedelta(days=1)))
-        new = TaskNotification.query.filter(TaskNotification.created_at == self.now + timedelta(days=1)).all()
-        self.assertEqual({self.people["author"].id, self.people["sender-head"].id},
-                         {n.user_id for n in new if n.task_id == first.id})
-        self.assertEqual({"reminder_due_today"}, {n.event_type for n in new if n.task_id == first.id})
-        self.assertEqual({"reminder_overdue"}, {n.event_type for n in new if n.task_id == second.id})
+        self.concurrent(task,("job","return"))
+        run_task_reminders(now=self.now);db.session.commit()
+        self.assertEqual(4,TaskNotification.query.filter(TaskNotification.event_type.like("reminder_%")).count())
+        self.assertEqual(1,db.session.get(Task,task.id).rework_cycle)
+        self.assertEqual(0,run_task_reminders(now=self.now))
+
 
     def test_new_schema_reminders_roll_back_with_caller_transaction(self):
         task = self.task(self.now + timedelta(days=1))
@@ -460,8 +480,8 @@ class NotificationMigrationTests(unittest.TestCase):
         with app.app_context():
             db.session.execute(text("INSERT INTO task_notifications (user_id, event_type, message) VALUES (1, 'system', 'Existing notification')"))
             db.session.commit()
-        self.assertEqual(0, runner.invoke(args=["db", "upgrade"], catch_exceptions=False).exit_code)
-        self.assertEqual(0, runner.invoke(args=["db", "upgrade"], catch_exceptions=False).exit_code)
+        self.assertEqual(0, runner.invoke(args=["db", "upgrade", "20261024_07"], catch_exceptions=False).exit_code)
+        self.assertEqual(0, runner.invoke(args=["db", "upgrade", "20261024_07"], catch_exceptions=False).exit_code)
         with app.app_context():
             note = TaskNotification.query.one()
             self.assertEqual("Existing notification", note.message)
@@ -472,3 +492,44 @@ class NotificationMigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from support.migration_fixtures import MigrationDatabase
+
+
+class LegacyReminderBridgeTests(MigrationDatabase,unittest.TestCase):
+    def test_existing_revision07_scheduler_remains_readable_and_keeps_its_old_key(self):
+        self.upgrade("20261024_07")
+        departments=self.rows("departments");ids={}
+        for name,role,dept in (("author","employee",departments[0]["id"]),("worker","employee",departments[1]["id"]),
+                              ("head","head",departments[1]["id"])):
+            user=User(username=name,full_name=name,role=role,department_id=dept,password_hash="synthetic")
+            db.session.add(user);db.session.flush();ids[name]=user.id
+        due=datetime(2030,1,3,9,tzinfo=UTC);now=datetime(2030,1,1,7,tzinfo=UTC)
+        db.session.execute(text("INSERT INTO tasks (title,description,author_id,sender_department_id,recipient_department_id,assignee_id,status,due_at,sent_at,created_at) VALUES (:title,:description,:author,:sender,:recipient,:worker,'in_progress',:due,:sent,:sent)").bindparams(
+                bindparam("due",type_=db.DateTime(timezone=True)),bindparam("sent",type_=db.DateTime(timezone=True))),
+            dict(title="Synthetic legacy",description="Required",author=ids["author"],worker=ids["worker"],sender=departments[0]["id"],recipient=departments[1]["id"],due=due,sent=datetime(2029,12,1,tzinfo=UTC)))
+        db.session.commit();before=self.rows("tasks")
+        self.assertEqual(3,run_task_reminders(now=now));db.session.commit()
+        self.assertEqual(0,run_task_reminders(now=now))
+        self.assertEqual(before,self.rows("tasks"))
+        from hashlib import sha256
+        task_id=before[0]["id"]
+        raw=f"{task_id}|{ids['author']}|{due.isoformat()}|2030-01-01|reminder_two_days"
+        self.assertIsNotNone(TaskNotification.query.filter_by(deduplication_key=sha256(raw.encode()).hexdigest()).first())
+
+    def test_revision04_request_free_bridge_preserves_old_calendar_key(self):
+        self.upgrade("20261024_04")
+        departments=self.rows("departments");ids={}
+        for name,dept in (("author",departments[0]["id"]),("worker",departments[1]["id"])):
+            db.session.execute(text("INSERT INTO users (full_name,username,password_hash,role,department_id) VALUES (:name,:name,'synthetic','teacher',:dept)"),dict(name=name,dept=dept))
+            ids[name]=db.session.execute(text("SELECT id FROM users WHERE username=:name"),dict(name=name)).scalar_one()
+        due=datetime(2030,1,3,9,tzinfo=UTC);now=datetime(2030,1,1,7,tzinfo=UTC)
+        db.session.execute(text("INSERT INTO tasks (title,description,author_id,sender_department_id,recipient_department_id,assignee_id,status,due_at,created_at) VALUES ('Synthetic legacy','Required',:author,:sender,:recipient,:worker,'in_progress',:due,:created)").bindparams(
+            bindparam("due",type_=db.DateTime(timezone=True)),bindparam("created",type_=db.DateTime(timezone=True))),
+            dict(author=ids["author"],worker=ids["worker"],sender=departments[0]["id"],recipient=departments[1]["id"],due=due,created=datetime(2029,12,1,tzinfo=UTC)))
+        db.session.commit();before=self.rows("tasks")
+        self.assertEqual(2,run_task_reminders(now=now));db.session.commit()
+        self.assertEqual(0,run_task_reminders(now=now));self.assertEqual(before,self.rows("tasks"))
+        with self.app.test_request_context():
+            with self.assertRaises(RuntimeError):run_task_reminders(now=now)

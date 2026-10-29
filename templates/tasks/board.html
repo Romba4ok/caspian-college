@@ -1,4 +1,4 @@
-<p class="sr-only" id="board-help">{% if direction == 'completed' %}Закрытые задачи сгруппированы по итоговому статусу. Откройте карточку для просмотра результата и истории. Изменять статусы нельзя.{% else %}Перетаскивайте задачи между этапами или используйте «Действия».{% endif %}</p>
+<p class="sr-only" id="board-help">{% if direction == 'completed' %}Закрытые задачи сгруппированы по итоговому статусу. Откройте карточку для просмотра результата и истории. Доска доступна только для просмотра; возврат на доработку выполняется отдельным действием в полной карточке.{% else %}Перетаскивайте задачи между этапами или используйте «Действия».{% endif %}</p>
 <p id="board-feedback" class="task-notice" role="status" aria-live="polite" aria-atomic="true" hidden></p>
 <button id="board-retry" type="button" hidden>Повторить обновление доски</button>
 {% include 'tasks/_board_content.html' %}
@@ -12,7 +12,7 @@
     <input type="hidden" name="revision" id="board-revision">
     <label for="board-action">Действие</label><select id="board-action" required aria-describedby="board-action-help"></select>
     <p id="board-action-help" class="hint"></p>
-    <div id="board-assignee-field" hidden><label for="board-assignee">Исполнитель <span class="hint">Один участник отдела-получателя; обязательно</span></label><select id="board-assignee" name="assignee_id" disabled></select></div>
+    <div id="board-assignee-field" hidden><label for="board-assignee">Исполнители <span class="hint">Один или несколько участников отдела-получателя; обязательно</span></label><select id="board-assignee" name="assignee_ids" multiple size="5" disabled></select></div>
     <div id="board-deadline-field" hidden><label for="board-deadline">Новый срок <span class="hint">Обязательно; {{ config.TASK_TIMEZONE }}</span></label><input id="board-deadline" type="datetime-local" name="due_at" disabled></div>
     <label for="board-comment">Комментарий <span class="hint">Обязательно</span></label><textarea id="board-comment" name="comment" rows="4" required></textarea>
     {% if upload_policy and upload_policy.allowed_extensions %}

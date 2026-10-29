@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import create_app
 from app.extensions import db
@@ -12,6 +13,11 @@ from support.portal_fixtures import PortalCase
 
 
 class AdminPanelTests(PortalCase):
+    def dispose_extra_app(self, app):
+        with app.app_context():
+            db.session.remove()
+            db.engine.dispose()
+
     def audits(self):
         with self.app.app_context():
             return [dict(action=e.action, object_id=e.object_id, actor=e.actor_snapshot, details=e.details) for e in AdminAuditEvent.query.order_by(AdminAuditEvent.id)]
@@ -29,25 +35,23 @@ class AdminPanelTests(PortalCase):
         with self.app.app_context():
             self.assertTrue(db.session.get(User, user["id"]).check_password("new-password"))
         self.assertEqual(302, self.client.post(f'/admin/users/{user["id"]}/delete').status_code)
-        self.assertIsNone(self.account("renamed"))
+        self.assertTrue(self.account("renamed")["is_blocked"])
         entries = self.audits()
-        self.assertEqual(["account_created", "account_updated", "account_deleted"], [e["action"] for e in entries])
+        self.assertEqual(["account_created", "account_updated", "account_blocked"], [e["action"] for e in entries])
         serialized = json.dumps(entries)
         for secret in ("new-password", "member-password", updated["password_hash"], "password_hash"):
             self.assertNotIn(secret, serialized)
         self.assertTrue(entries[1]["details"]["after"]["password_changed"])
         self.assertEqual("employee", entries[1]["details"]["before"]["role"])
 
-    def test_blank_edit_password_keeps_hash_and_ignores_hidden_legacy_fields(self):
-        self.login()
-        before = self.account("employee")
-        response = self.client.post(f'/admin/users/{before["id"]}/edit', data=self.form("employee", password="", department_role="head", password_hash="forged", is_blocked="true"))
-        self.assertEqual(302, response.status_code)
-        after = self.account("employee")
-        self.assertEqual(before["password_hash"], after["password_hash"])
-        self.assertEqual("employee", after["role"])
-        self.assertIsNone(after["department_role"])
-        self.assertFalse(after["is_blocked"])
+    def test_blank_password_is_preserved_and_untrusted_fields_are_rejected(self):
+        self.login();before=self.account("employee")
+        response=self.client.post(f'/admin/users/{before["id"]}/edit',data=self.form("employee",password="",department_role="head",password_hash="forged",is_blocked="true"))
+        self.assertEqual(400,response.status_code);self.assertEqual(before,self.account("employee"))
+        self.assertEqual(302,self.client.post(f'/admin/users/{before["id"]}/edit',data=self.form("employee",password="")).status_code)
+        after=self.account("employee")
+        self.assertEqual(before["password_hash"],after["password_hash"])
+        self.assertEqual(("employee",None,False),(after["role"],after["department_role"],after["is_blocked"]))
 
     def test_only_admin_cannot_be_demoted_blocked_deleted_or_duplicated(self):
         self.login()
@@ -57,7 +61,7 @@ class AdminPanelTests(PortalCase):
         self.assertEqual(400, self.client.post(f'/admin/users/{before["id"]}/edit', data=self.form("root", role="employee")).status_code)
         for action in ("block", "delete"):
             response = self.client.post(f'/admin/users/{before["id"]}/{action}', follow_redirects=True)
-            self.assertIn("последнего администратора".encode(), response.data)
+            self.assertIn("единственного администратора".encode(), response.data)
         self.assertEqual(before, self.account("root"))
         self.assertEqual([], self.audits())
 
@@ -96,7 +100,7 @@ class AdminPanelTests(PortalCase):
     def linked(self, kind):
         target, owner = self.ids["outsider"], self.ids["employee"]
         task_id = self.task(author_id=target if kind == "author" else owner,
-            assignee_id=target if kind == "assignee" else None, status="assigned" if kind == "assignee" else "draft")
+            assignee_id=target if kind == "assignee" else None, status="in_progress" if kind == "assignee" else "new")
         with self.app.app_context():
             values = {
                 "comment": lambda: TaskComment(task_id=task_id, author_id=target, body="Keep"),
@@ -109,36 +113,31 @@ class AdminPanelTests(PortalCase):
                 db.session.commit()
         return target
 
-    def test_every_task_reference_prevents_delete_without_losing_data(self):
+    def test_delete_alias_preserves_all_references_and_guards_active_assignment(self):
         self.login()
-        # Each reference is tested in an independent fixture so author links do
-        # not accidentally mask the remaining reference checks.
-        for kind in ("author", "assignee", "comment", "attachment", "event", "notification"):
-            with self.subTest(kind=kind):
-                with self.app.app_context():
-                    user = User(full_name=kind, username="linked-"+kind, role="employee", department_id=self.other_department_id, password_hash="synthetic")
-                    db.session.add(user)
-                    db.session.commit()
-                    self.ids["outsider"] = user.id
-                target = self.linked(kind)
-                before = self.snapshot()
-                response = self.client.post(f"/admin/users/{target}/delete", follow_redirects=True)
-                self.assertIn("Вместо удаления заблокируйте её".encode(), response.data)
-                self.assertEqual(before, self.snapshot())
-                self.client.post(f"/admin/users/{target}/block")
-                with self.app.app_context():
-                    self.assertTrue(db.session.get(User, target).is_blocked)
+        for kind in ("author","assignee","comment","attachment","event","notification"):
+            with self.app.app_context():
+                user=User(full_name=kind,username="linked-"+kind,role="employee",department_id=self.other_department_id,password_hash="synthetic")
+                db.session.add(user);db.session.commit();self.ids["outsider"]=user.id
+            target=self.linked(kind)
+            with self.app.app_context():
+                before={m.__tablename__:db.session.execute(text("SELECT * FROM "+m.__tablename__+" ORDER BY id")).all()
+                    for m in (Task,TaskComment,TaskAttachment,TaskEvent,TaskNotification)}
+            with patch("app.admin.db.session.delete",side_effect=AssertionError("No physical deletion")):
+                response=self.client.post(f"/admin/users/{target}/delete")
+            self.assertEqual(409 if kind=="assignee" else 302,response.status_code)
+            with self.app.app_context():
+                self.assertEqual(kind!="assignee",db.session.get(User,target).is_blocked)
+                for model in (Task,TaskComment,TaskAttachment,TaskEvent,TaskNotification):
+                    self.assertEqual(before[model.__tablename__],db.session.execute(text("SELECT * FROM "+model.__tablename__+" ORDER BY id")).all())
 
-    def test_reference_race_rolls_back_audit_and_keeps_session_usable(self):
-        self.login()
-        target = self.linked("author")
-        before = self.snapshot()
-        with patch("app.admin._has_task_links", return_value=False):
-            response = self.client.post(f"/admin/users/{target}/delete", follow_redirects=True)
-        self.assertIn("Нельзя удалить учётную запись со связанными данными".encode(), response.data)
-        self.assertEqual(before, self.snapshot())
-        self.assertEqual([], self.audits())
-        self.assertEqual(200, self.client.get("/admin/users").status_code)
+    def test_disable_commit_failure_rolls_back_audit_and_keeps_session_usable(self):
+        self.login();target=self.linked("author");before=self.snapshot()
+        with patch("app.admin.db.session.commit",side_effect=SQLAlchemyError("synthetic-secret")):
+            response=self.client.post(f"/admin/users/{target}/delete")
+        self.assertEqual(500,response.status_code);self.assertNotIn(b"synthetic-secret",response.data)
+        self.assertEqual(before,self.snapshot());self.assertEqual([],self.audits())
+        self.assertEqual(200,self.client.get("/admin/users").status_code)
 
     def test_linked_delete_requires_csrf_and_administrator(self):
         self.login()
@@ -159,6 +158,7 @@ class AdminPanelTests(PortalCase):
                 "ADMIN_PASSWORD": "root-password",
             }
         )
+        self.addCleanup(self.dispose_extra_app, migration_app)
         with migration_app.app_context():
             with db.engine.begin() as connection:
                 connection.exec_driver_sql(
@@ -213,6 +213,7 @@ class AdminPanelTests(PortalCase):
                 "ADMIN_PASSWORD": "fresh-password",
             }
         )
+        self.addCleanup(self.dispose_extra_app, fresh_app)
         result = fresh_app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
         self.assertEqual(0, result.exit_code, result.output)
         with fresh_app.app_context():

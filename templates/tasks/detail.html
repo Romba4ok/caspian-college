@@ -1,141 +1,90 @@
 {% extends 'base.html' %}
-{% block title %}{{ task.title }} {{ t('· Задачи') }}{% endblock %}
+{% block title %}{{ task.title }} · Задачи{% endblock %}
 {% block content %}
 {% import 'tasks/_task_readonly.html' as read with context %}
+{% macro validation(key, field) -%}
+{% if action_error and failed_action == key and action_error_field == field %}aria-invalid="true" aria-describedby="{{ key }}-{{ field }}-error"{% endif %}
+{%- endmacro %}
+{% macro field_error(key, field) -%}
+{% if action_error and failed_action == key and action_error_field == field %}<p class="hint" id="{{ key }}-{{ field }}-error">{{ action_error }}</p>{% endif %}
+{%- endmacro %}
+{% macro uploads(key) -%}
+<label for="{{ key }}-attachment">Файлы к комментарию <span class="hint">Необязательно; можно выбрать несколько</span></label>
+<input id="{{ key }}-attachment" type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}" {{ validation(key, 'attachment') }}>
+{{ field_error(key, 'attachment') }}
+<p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл и до 21 МБ на весь запрос. Остальные материалы добавьте следующим комментарием. После ошибки выберите файлы повторно.</p>
+{%- endmacro %}
 <div class="page-heading task-detail-heading">
-  <div><p class="hint"><a href="{{ url_for(back_endpoint, scope=back_scope) }}">{{ t('К списку задач') }}</a></p><h1>{{ task.title }}</h1><p>{{ t(task.sender_department.name) }} → {{ t(task.recipient_department.name) }}</p></div>
-  {% if may_edit %}<a class="button secondary-button" href="{{ url_for('tasks.task_edit', task_id=task.id) }}">{{ t('Редактировать') }}</a>{% endif %}
+  <div><p class="hint"><a href="{{ url_for(back_endpoint, scope=back_scope) }}">К списку задач</a></p><h1>{{ task.title }}</h1><p>{{ task.sender_department.name }} → {{ task.recipient_department.name }}</p></div>
 </div>
-
 {{ read.notices() }}
 <div class="task-detail-layout">
   <section class="card task-detail-main{% if deadline_state.overdue %} task-card-overdue{% endif %}">
     {{ read.badges() }}
-    {% if action_error %}<div class="flash error" role="alert" tabindex="-1" autofocus><p>{{ action_error }}</p><a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">Обновить карточку</a></div>{% endif %}
+    {% if action_error %}
+    <div class="flash error" role="alert" tabindex="-1" autofocus aria-labelledby="action-error-title">
+      <h2 id="action-error-title">Действие не сохранено</h2><p>{{ action_error }}</p>
+      {% if failed_action in action_urls or (failed_action == 'comment' and may_contribute) %}<a href="#{{ failed_action }}-{{ action_error_field or 'comment' }}">Проверить поле</a>
+      {% elif request.form.get('comment') %}<label for="unsaved-action-comment">Ваш несохранённый комментарий</label><textarea id="unsaved-action-comment" readonly>{{ request.form.get('comment') }}</textarea>{% endif %}
+      <a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">Обновить карточку</a>
+    </div>
+    {% endif %}
     {{ read.facts() }}
+    {{ read.working_notices() }}
     <span id="task-permitted-actions" tabindex="-1"></span>
-    {% if approval_actions %}
+    {% if task_actions %}
     <section aria-labelledby="task-actions-heading">
       <h2 id="task-actions-heading">Действия с задачей</h2>
-      {% for action, label in approval_actions %}
-      <details {% if failed_action == action %}open{% endif %}>
-        <summary>{{ label }}</summary>
-        <form method="post" enctype="multipart/form-data" action="{{ url_for('tasks.task_approval', task_id=task.id, action=action) }}" class="form-stack">
+      {% for action in task_actions %}
+      {% set key = action.key %}
+      <details {% if failed_action == key %}open{% endif %}>
+        <summary>{{ action.label }}</summary>
+        <form method="post" enctype="multipart/form-data" action="{{ action.url }}" class="form-stack">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="revision" value="{{ task.revision }}">
-          {% if action in ('approve', 'send') %}<p>Задача станет доступна отделу «{{ task.recipient_department.name }}». После отправки поля поручения изменять нельзя.</p>{% endif %}
-          <label for="approval-comment-{{ action }}">Комментарий <span class="hint">Обязательно</span></label>
-          <textarea id="approval-comment-{{ action }}" name="comment" rows="3" required>{{ request.form.get('comment', '') if failed_action == action else '' }}</textarea>
-{% if upload_policy and upload_policy.allowed_extensions %}
-          <label>Файлы к комментарию <span class="hint">Необязательно; можно выбрать несколько</span>
-            <input type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
-          </label>
-          <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл и до 21 МБ на весь запрос. Остальные материалы добавьте следующим комментарием. После ошибки выберите файлы повторно.</p>
-          {% else %}<p class="hint">Новые вложения отключены настройками. Текстовый комментарий можно сохранить.</p>{% endif %}
-          <button type="submit">{{ label }}</button>
-        </form>
-      </details>
-      {% endfor %}
-    </section>
-    {% endif %}
-    {{ read.working_notices() }}
-    {% if execution_actions %}
-    <section aria-labelledby="execution-actions-heading">
-      <h2 id="execution-actions-heading">Работа с задачей</h2>
-      {% for action, label in execution_actions %}
-      <details {% if failed_action == action %}open{% endif %}>
-        <summary>{{ label }}</summary>
-        <form method="post" enctype="multipart/form-data" action="{{ url_for('tasks.task_execution', task_id=task.id, action=action) }}" class="form-stack">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="revision" value="{{ task.revision }}">
-          {% if action in ('assign', 'reassign') %}
-          <label for="execution-assignee-{{ action }}">Исполнитель <span class="hint">Один участник отдела-получателя</span></label>
-          <select id="execution-assignee-{{ action }}" name="assignee_id" required>
-            <option value="">Выберите сотрудника или начальника</option>
-            {% for candidate in assignee_candidates %}{% if action == 'assign' or candidate.id != task.assignee_id %}
-            <option value="{{ candidate.id }}" {% if failed_action == action and request.form.get('assignee_id') == candidate.id|string %}selected{% endif %}>{{ candidate.full_name }} · {{ portal_roles[candidate.role] }}</option>
-            {% endif %}{% endfor %}
-          </select>
-          <p class="hint">{{ 'Назначение не начинает работу: исполнитель отмечает начало отдельно.' if action == 'assign' else 'Срок, материалы и текущий этап работы сохранятся.' }}</p>
-          {% elif action == 'request_clarification' %}<p class="hint">Опишите вопрос отделу-отправителю. Обычный комментарий не закрывает запрос уточнения.</p>
-          {% elif action == 'answer_clarification' %}<p class="hint">Отдельный ответ вернёт задачу в «В работе» к назначенному исполнителю.</p>{% endif %}
-          <label for="execution-comment-{{ action }}">{{ 'Ответ на уточнение' if action == 'answer_clarification' else 'Комментарий' }} <span class="hint">Обязательно</span></label>
-          <textarea id="execution-comment-{{ action }}" name="comment" rows="3" required>{{ request.form.get('comment', '') if failed_action == action else '' }}</textarea>
-{% if upload_policy and upload_policy.allowed_extensions %}
-          <label>Файлы к комментарию <span class="hint">Необязательно; можно выбрать несколько</span>
-            <input type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
-          </label>
-          <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл и до 21 МБ на весь запрос. Остальные материалы добавьте следующим комментарием. После ошибки выберите файлы повторно.</p>
-          {% else %}<p class="hint">Новые вложения отключены настройками. Текстовый комментарий можно сохранить.</p>{% endif %}
-          <button type="submit">{{ label }}</button>
-        </form>
-      </details>
-      {% endfor %}
-    </section>
-    {% endif %}
-    {% if review_actions %}
-    <section aria-labelledby="review-actions-heading">
-      <h2 id="review-actions-heading">Результат и управление задачей</h2>
-      {% for action, label in review_actions %}
-      <details {% if failed_action == action %}open{% endif %}>
-        <summary>{{ label }}</summary>
-        <form method="post" enctype="multipart/form-data" action="{{ url_for('tasks.task_review', task_id=task.id, action=action) }}" class="form-stack">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="revision" value="{{ task.revision }}">
-          {% if action == 'submit_result' %}<p class="hint">Результат сначала проверяют начальники вашего отдела. Это ещё не завершение задачи.</p>
-          {% elif action == 'forward_result' %}<p class="hint">После вашей проверки результат поступит на окончательную приёмку начальникам отдела-отправителя.</p>
-          {% elif action == 'complete' %}<p>Подтверждение окончательно завершит задачу. Она останется доступна только для просмотра и скачивания.</p>
-          {% elif action == 'return_result' %}<p class="hint">Задача вернётся прежнему исполнителю в «В работе». После доработки обе проверки проходят заново.</p>
-          {% elif action in ('cancel', 'reject') %}<p>Задача будет окончательно закрыта со статусом «{{ 'Отменена' if action == 'cancel' else 'Отклонена' }}». История и материалы сохранятся; возобновить её нельзя.</p>
-          {% elif action == 'deadline' %}
-          <label for="review-due-at">Новый срок <span class="hint">Обязательно; {{ config.TASK_TIMEZONE }}</span></label>
-          <input id="review-due-at" type="datetime-local" name="due_at" required value="{{ request.form.get('due_at', '') if failed_action == action else (task.due_at|task_datetime('%Y-%m-%dT%H:%M') if task.due_at else '') }}">
-          <p class="hint">Снять срок нельзя. Перенос сохраняется в истории.</p>
+          {% if action.assignee %}
+          <label for="{{ key }}-assignee_ids">Исполнители <span class="hint">Обязательно; один или несколько участников отдела-получателя</span></label>
+          <select id="{{ key }}-assignee_ids" name="assignee_ids" multiple size="5" required {{ validation(key, 'assignee_ids') }}>
+            {% for candidate in assignee_candidates %}<option value="{{ candidate.id }}" {% if (failed_action == key and candidate.id|string in request.form.getlist('assignee_ids')) or (failed_action != key and key == 'reassign' and candidate.id in task.assignee_ids) %}selected{% endif %}>{{ candidate.full_name }} · {{ portal_roles[candidate.role] }}</option>{% endfor %}
+          </select>{{ field_error(key, 'assignee_ids') }}<p class="hint">Для выбора нескольких участников на компьютере удерживайте Ctrl или Cmd.</p>
+          <p class="hint">{{ 'Назначение сразу переведёт задачу в «В работе».' if key == 'assign' else 'Меняется состав; срок и материалы сохраняются.' }}</p>
+          {% elif key == 'claim' %}<p class="hint">Вы присоединитесь к исполнителям. Остальные участники сохранятся, задача будет «В работе».</p>
+          {% elif key == 'release' %}<p class="hint">Вы снимете только себя. Если другие исполнители остались, работа продолжится; если вы последний — задача станет «Новой».</p>
+          {% elif key == 'complete' %}<p>Задача сразу перейдёт в «Выполнено». Отправитель увидит результат и сможет вернуть её на доработку без отдельной приёмки.</p>
+          {% elif key == 'return' %}<p class="hint">Задача вернётся прежним доступным исполнителям в «В работе» с пометкой «На доработке». Прежний результат останется в истории. Недоступные участники не получат доступ автоматически.</p>
+          {% elif key in ('cancel', 'reject') %}<p>Задача будет окончательно закрыта со статусом «{{ 'Отменена' if key == 'cancel' else 'Отклонена' }}». История и материалы сохранятся; возобновить её нельзя.</p>
+          {% elif action.deadline %}
+          <label for="{{ key }}-due_at">Новый срок <span class="hint">Обязательно; {{ config.TASK_TIMEZONE }}</span></label>
+          <input id="{{ key }}-due_at" type="datetime-local" name="due_at" required value="{{ request.form.get('due_at', '') if failed_action == key else (task.due_at|task_datetime('%Y-%m-%dT%H:%M') if task.due_at else '') }}" {{ validation(key, 'due_at') }}>
+          {{ field_error(key, 'due_at') }}<p class="hint">Снять срок нельзя. Перенос сохраняется в истории.</p>
           {% endif %}
-          <label for="review-comment-{{ action }}">{{ 'Описание результата' if action == 'submit_result' else ('Причина' if action in ('cancel', 'reject') else 'Комментарий') }} <span class="hint">Обязательно</span></label>
-          <textarea id="review-comment-{{ action }}" name="comment" rows="4" required>{{ request.form.get('comment', request.form.get('reason', '')) if failed_action == action else '' }}</textarea>
-{% if upload_policy and upload_policy.allowed_extensions %}
-          <label>Файлы к комментарию <span class="hint">Необязательно; можно выбрать несколько</span>
-            <input type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
-          </label>
-          <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл и до 21 МБ на весь запрос. Остальные материалы добавьте следующим комментарием. После ошибки выберите файлы повторно.</p>
-          {% else %}<p class="hint">Новые вложения отключены настройками. Текстовый комментарий можно сохранить.</p>{% endif %}
-          <button type="submit">{{ label }}</button>
+          <label for="{{ key }}-comment">{{ 'Описание результата' if key == 'complete' else ('Замечания к результату' if key == 'return' else ('Причина' if key in ('cancel', 'reject') else 'Комментарий')) }} <span class="hint">Обязательно</span></label>
+          <textarea id="{{ key }}-comment" name="comment" rows="4" required {{ validation(key, 'comment') }}>{{ request.form.get('comment', '') if failed_action == key else '' }}</textarea>{{ field_error(key, 'comment') }}
+          {{ uploads(key) }}
+          <button type="submit">{{ action.label }}</button>
         </form>
       </details>
       {% endfor %}
     </section>
     {% endif %}
-
   </section>
-
   <aside class="task-detail-side">
-    <section class="card task-detail-section"><h2>{{ t('Вложения') }}</h2>
-      {{ read.attachments() }}
-
-    </section>
-    <section class="card task-detail-section"><h2 id="task-discussion">{{ t('Комментарии') }}</h2>
+    <section class="card task-detail-section"><h2>Вложения</h2>{{ read.attachments() }}</section>
+    <section class="card task-detail-section"><h2 id="task-discussion">Комментарии</h2>
       {{ read.comments() }}
       {% if may_contribute %}
-      <form method="post" enctype="multipart/form-data" action="{{ url_for('tasks.task_comment', task_id=task.id) }}" class="form-stack">
+      <form method="post" enctype="multipart/form-data" action="{{ comment_url }}" class="form-stack">
         <input type="hidden" name="revision" value="{{ task.revision }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>{{ t('Комментарий') }} <span class="hint">{{ t('Обязательно') }}</span><textarea name="comment" rows="4" required>{{ request.form.get('comment', '') if failed_action == 'comment' else '' }}</textarea></label>
-        {% if task.status == 'awaiting_clarification' %}<p class="hint">Обычный комментарий не меняет статус. Для ответа используйте отдельное действие «Ответить на уточнение».</p>{% endif %}
-{% if upload_policy and upload_policy.allowed_extensions %}
-          <label>Файлы к комментарию <span class="hint">Необязательно; можно выбрать несколько</span>
-            <input type="file" name="attachment" multiple accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
-          </label>
-          <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл и до 21 МБ на весь запрос. Остальные материалы добавьте следующим комментарием. После ошибки выберите файлы повторно.</p>
-          {% else %}<p class="hint">Новые вложения отключены настройками. Текстовый комментарий можно сохранить.</p>{% endif %}
-        <button type="submit">{{ t('Добавить комментарий') }}</button>
+        <label for="comment-comment">Комментарий <span class="hint">Обязательно</span></label>
+        <textarea id="comment-comment" name="comment" rows="4" required {{ validation('comment', 'comment') }}>{{ request.form.get('comment', '') if failed_action == 'comment' else '' }}</textarea>{{ field_error('comment', 'comment') }}
+        <p class="hint">Комментарий и вложения сохраняются в истории. Статус, исполнитель и срок не меняются.</p>
+        {{ uploads('comment') }}
+        <button type="submit">Добавить комментарий</button>
       </form>
       {% endif %}
     </section>
   </aside>
 </div>
-
-<section class="card task-history"><h2>{{ t('История') }}</h2>
-{{ read.history() }}
-</section>
+<section class="card task-history"><h2>История</h2>{{ read.history() }}</section>
 {% endblock %}

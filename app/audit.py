@@ -25,14 +25,15 @@ def task_snapshot(task):
     """Capture values, including unknown dates, without keeping live ORM objects."""
     from datetime import datetime, timezone
     fields = ("title", "description", "author_id", "sender_department_id", "recipient_department_id",
-              "assignee_id", "status", "priority", "category_id", "category", "contact_person",
-              "due_at", "sent_at", "completed_at", "closed_at", "revision")
+              "assignee_ids", "status", "priority", "category_id", "category", "contact_person",
+              "due_at", "sent_at", "completed_at", "closed_at", "revision", "is_rework", "rework_cycle")
     result = {}
     for field in fields:
         value = getattr(task, field)
         if isinstance(value, datetime):
             value = (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
         result[field] = value
+    result["assignees"] = [{"id": user.id, "name": user.full_name} for user in task.assignees]
     return result
 
 
@@ -44,6 +45,11 @@ def record_task_event(*, task, actor, event_type, comment, before=None):
     event = TaskEvent(task_id=task.id, actor_id=actor.id, actor_snapshot=actor_snapshot(actor),
         event_type=event_type, comment_id=entry.id,
         details={"before": before or {}, "after": task_snapshot(task), "comment": comment, "comment_id": entry.id})
+    if event_type in ("assigned", "claimed", "reassigned", "released", "returned_for_revision"):
+        old_ids = set((before or {}).get("assignee_ids") or [])
+        new_ids = set(event.details["after"]["assignee_ids"])
+        event.details = {**event.details, "added_assignee_ids": sorted(new_ids-old_ids),
+                         "removed_assignee_ids": sorted(old_ids-new_ids)}
     db.session.add(event)
     db.session.flush()
     return event
@@ -55,7 +61,7 @@ def _safe(value):
         for key, item in value.items():
             if key == "password_changed" and isinstance(item, bool):
                 result[key] = item
-            elif not any(part in key.casefold() for part in ("password", "secret", "token", "connection", "database")):
+            elif isinstance(key,str) and not any(part in key.casefold() for part in ("password", "secret", "token", "connection", "database", "cookie", "session", "auth_stamp", "authstamp", "api_key", "apikey", "api-key", "credential", "authorization")):
                 result[key] = _safe(item)
         return result
     if isinstance(value, (list, tuple)):
@@ -75,7 +81,7 @@ def record_admin_event(action, object_type, object_id, *, before=None, after=Non
 
 ADMIN_ACTIONS = {
     "account_created": "Учётная запись создана", "account_updated": "Учётная запись изменена",
-    "account_blocked": "Учётная запись заблокирована", "account_unblocked": "Учётная запись разблокирована",
+    "account_blocked": "Учётная запись отключена", "account_unblocked": "Доступ к учётной записи восстановлен",
     "account_deleted": "Учётная запись удалена", "department_created": "Отдел создан",
     "department_renamed": "Отдел переименован", "department_archived": "Отдел архивирован",
     "department_restored": "Отдел восстановлен", "department_deleted": "Пустой отдел удалён",
@@ -100,9 +106,10 @@ class AuditFilterError(ValueError):
 def audit_text(value):
     """Never expose credential-shaped content, including in historical free text."""
     text = str(value)
+    text = re.sub(r"(?im)^(\s*(?:set-)?cookie\s*:\s*)[^\r\n]+", r"\1[скрыто]", text)
     text = re.sub(r"(?i)\b(?:postgres(?:ql)?(?:\+[\w]+)?|mysql(?:\+[\w]+)?|mssql(?:\+[\w]+)?|sqlite|redis|mongodb(?:\+srv)?)://[^\s<>\"']+", "[строка подключения скрыта]", text)
     text = re.sub(r"(?i)\b(?:https?|[a-z][\w+.-]*)://[^\s/@]+:[^\s/@]+@[^\s<>\"']+", "[строка подключения скрыта]", text)
-    text = re.sub(r"(?i)(\b(?:password(?:_hash)?|passwd|pwd|secret(?:_key)?|(?:access_|refresh_|session_|csrf_)?token|session(?:_id|_cookie|id)|api_key|пароль|токен)\b[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)", r"\1[скрыто]", text)
+    text = re.sub(r"(?i)(\b(?:password(?:_hash)?|passwd|pwd|secret(?:_key)?|(?:access_|refresh_|session_|csrf_)?token|session(?:_id|_cookie|id)?|_?auth_stamp|cookie|authorization|api[_-]?key|пароль|токен)\b[\"']?\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|(?:Bearer|Basic)\s+[^\s,;]+|[^\s,;]+)", r"\1[скрыто]", text)
     text = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [скрыто]", text)
     return re.sub(r"\$(?:scrypt|pbkdf2|2[aby])[^\s]+|\b(?:scrypt|pbkdf2):[^\s]+", "[хэш скрыт]", text)
 
@@ -158,7 +165,8 @@ def _audit_value(field, value):
         return "Не указано"
     if type(value) is bool:
         return "Да" if value else "Нет"
-    labels = {"role": ROLES, "status": STATUS_LABELS, "priority": PRIORITY_LABELS}
+    historical_statuses = STATUS_LABELS | {"accepted":"Принята (прежний процесс)", "ready":"Готова (прежний процесс)"}
+    labels = {"role": ROLES, "status": historical_statuses, "priority": PRIORITY_LABELS}
     if field in labels and isinstance(value, str):
         return labels[field].get(value, "Историческое значение неизвестно")
     if field.endswith("_at") and isinstance(value, str):
@@ -186,6 +194,8 @@ def _audit_entry(row):
     if row["source"] == "task" and row["action"] in ("created", "edited") and after.get("status") == "draft":
         action = "Черновик создан" if row["action"] == "created" else "Черновик изменён"
     comment = details.get("comment") or details.get("reason")
+    if not isinstance(comment,str) or not comment.strip():
+        comment = "Системное пояснение: " + action if row["source"] == "admin" and row["action"] in ADMIN_ACTIONS else "Пояснение исторического события не сохранено"
     actor_key = row["actor_key"]
     if actor_key is not None and not re.fullmatch(r"[1-9][0-9]{0,9}", str(actor_key), flags=re.ASCII):
         actor_key = None

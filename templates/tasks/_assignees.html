@@ -1,0 +1,3 @@
+{% macro names(task) -%}
+{% for person in task.assignees %}{{ person.full_name }}{% if not person.is_active or person.role not in ('head', 'employee') or person.department_id != task.recipient_department_id %} (недоступен){% endif %}{% if not loop.last %}, {% endif %}{% else %}Не назначены{% endfor %}
+{%- endmacro %}

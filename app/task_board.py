@@ -3,33 +3,24 @@
 from types import SimpleNamespace
 
 from sqlalchemy import func
-from sqlalchemy.orm import joinedload, undefer
+from sqlalchemy.orm import joinedload, undefer, selectinload
 
 from .extensions import db
-from .models import Task, TaskAttachment, TaskComment, User
+from .models import Task, TaskAssignee, TaskAttachment, TaskComment, User
 
 
+ACTIVE_GROUPS = (("new", "Новые", ("new",)), ("in_progress", "В работе", ("in_progress",)))
 BOARD_GROUPS = {
-    "completed": (
-        ("completed", "Завершены", ("completed",)),
-        ("cancelled", "Отменены", ("cancelled",)),
-        ("rejected", "Отклонены", ("rejected",)),
-    ),
-    "received": (
-        ("to_do", "К выполнению", ("awaiting_assignment", "assigned")),
-        ("working", "В работе", ("in_progress",)),
-        ("clarification", "Уточнение", ("awaiting_clarification",)),
-        ("recipient_review", "Результат: проверка у начальника отдела", ("recipient_review",)),
-        ("sender_acceptance", "Результат: приёмка заказчиком", ("sender_acceptance",)),
-    ),
-    "sent": (
-        ("drafts", "Черновики", ("draft",)),
-        ("approval", "На согласовании", ("pending_approval",)),
-        ("dispatched", "Поручения отправлены", ("awaiting_assignment", "assigned")),
-        ("working", "Отдел выполняет", ("in_progress", "awaiting_clarification")),
-        ("review", "Проверка и приёмка результата", ("recipient_review", "sender_acceptance")),
-    ),
+    "completed": (("completed", "Выполнено", ("completed",)),
+        ("cancelled", "Отменены", ("cancelled",)), ("rejected", "Отклонены", ("rejected",))),
+    "received": ACTIVE_GROUPS,
+    "sent": ACTIVE_GROUPS,
 }
+
+
+def task_card_options():
+    return (undefer("*"), joinedload(Task.sender_department).undefer("*"),
+        joinedload(Task.recipient_department).undefer("*"), joinedload(Task.author), selectinload(Task.assignments).joinedload(TaskAssignee.user))
 
 
 def load_board_projection(visible_query, direction, actions_for_task):
@@ -40,13 +31,7 @@ def load_board_projection(visible_query, direction, actions_for_task):
     Nothing in this projection commits, locks or updates task records.
     """
     definitions = BOARD_GROUPS[direction]
-    tasks = visible_query.options(
-        undefer("*"),
-        joinedload(Task.sender_department).undefer("*"),
-        joinedload(Task.recipient_department).undefer("*"),
-        joinedload(Task.author),
-        joinedload(Task.assignee),
-    ).all()
+    tasks = visible_query.options(*task_card_options()).all()
     groups = [dict(key=key, label=label, statuses=statuses, tasks=[], count=0)
               for key, label, statuses in definitions]
     group_for_status = {status: group for group in groups for status in group["statuses"]}
@@ -84,7 +69,7 @@ def load_board_projection(visible_query, direction, actions_for_task):
     # Do not expose candidates on a card whose actions do not permit assignment,
     # even if another card in the same department needed that candidate query.
     task_candidates = {
-        task.id: candidates_by_department[task.recipient_department_id]
+        task.id: list(candidates_by_department[task.recipient_department_id])
         if any(action["assignee"] for action in actions[task.id]) else []
         for task in tasks
     }

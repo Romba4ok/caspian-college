@@ -118,24 +118,24 @@
     submit.textContent = action.label;
     assignee.disabled = !action.assignee; assignee.required = action.assignee;
     document.querySelector("#board-assignee-field").hidden = !action.assignee;
-    assignee.replaceChildren(option("", "Выберите сотрудника или начальника"));
+    assignee.replaceChildren();
     for (const user of active.candidates) {
-      if (action.key !== "reassign" || user.id !== active.assignee_id)
-        assignee.append(option(String(user.id), `${user.name} · ${user.role}`));
+      const item = option(String(user.id), `${user.name} · ${user.role}`);
+      item.selected = action.key === "reassign" && active.assignee_ids.includes(user.id);
+      assignee.append(item);
     }
     deadline.disabled = !action.deadline; deadline.required = action.deadline;
     document.querySelector("#board-deadline-field").hidden = !action.deadline;
     deadline.value = active.due_at;
     const hints = {
-      complete: "Подтверждение окончательно завершит задачу и перенесёт её в «Завершённые».",
-      cancel: "Задача будет окончательно отменена. История сохранится; возобновить её нельзя.",
-      reject: "Задача будет отклонена. Обязательно укажите причину; автор получит уведомление.",
-      submit_result: "Результат сначала проверяют начальники отдела-получателя.",
-      forward_result: "Результат поступит на окончательную приёмку начальникам отдела-отправителя.",
-      return_result: "Задача вернётся прежнему исполнителю в «В работе»; обе проверки проходят заново.",
-      send: "После отправки поручение увидит получатель. Поля задачи будут зафиксированы.",
-      approve: "Одобрение сразу отправит поручение получателю и зафиксирует его поля.",
-      assign: "Назначение не начинает работу: исполнитель отмечает начало отдельно.",
+      assign: "Назначение сразу переводит задачу в «В работе».",
+      claim: "Вы присоединитесь к команде, остальные исполнители сохранятся.",
+      reassign: "Меняется состав своего отдела; статус и материалы сохраняются.",
+      release: "Вы снимете только себя. После последнего участника задача станет «Новой», иначе работа продолжится.",
+      complete: "Задача сразу станет выполненной и перейдёт в «Завершённые». Отправитель сможет вернуть её на доработку.",
+      cancel: "Задача будет окончательно отменена. История сохраняется.",
+      reject: "Задача будет окончательно отклонена. Объясните причину отправителю.",
+      return: "Задача вернётся прежним доступным исполнителям в «В работе» с пометкой «На доработке».",
       deadline: "Снять срок нельзя. Старое и новое значения сохраняются в истории."
     };
     document.querySelector("#board-action-help").textContent = hints[action.key] || "Действие сохранится в истории вместе с вашим комментарием.";
@@ -283,7 +283,7 @@
     if (pending || revoked) return;
     pending = true; refresh.hidden = true; submit.disabled = true;
     saving.textContent = "Обновляем данные задачи…"; saving.hidden = false; form.setAttribute("aria-busy","true");
-    const oldAction = actionSelect.value, oldAssignee = assignee.value, oldDeadline = deadline.value;
+    const oldAction = actionSelect.value, oldAssignees = Array.from(assignee.selectedOptions, o => o.value), oldDeadline = deadline.value;
     try {
       await readBoard();
       if (phase === "posted") { say("Действие сохранено. Доска обновлена."); pending = false; finishClose(); return; }
@@ -298,13 +298,14 @@
           actionSelect.replaceChildren(option("","Выберите действие"),...active.actions.map(a => option(a.key,a.label)));
           actionSelect.value = active.actions.some(a => a.key === oldAction) ? oldAction : "";
           blocked = false; phase = "editing"; actionSelect.disabled = false; configure();
-          if (Array.from(assignee.options).some(o => o.value === oldAssignee)) assignee.value = oldAssignee;
+          for (const item of assignee.options) item.selected = oldAssignees.includes(item.value);
           if (chosen()?.deadline) deadline.value = oldDeadline;
           error.textContent = "Данные обновлены. Комментарий сохранён. Проверьте действие и поля перед отправкой.";
         }
-      } else error.textContent = "Доска перечитана. Результат прежней отправки мог быть сохранён; проверьте карточку. Эта форма повторно не отправляется.";
-      error.hidden = false;
-    } catch (_) { error.textContent = revoked ? "Доступ изменился. Откройте страницу заново." : "Не удалось обновить доску. Повторите только загрузку данных."; error.hidden = false; refresh.hidden = revoked; }
+      } else if (phase === "retired") error.textContent = "Данные обновлены. Закройте старую форму и откройте доступное действие заново.";
+      else error.textContent = "Доска перечитана. Результат прежней отправки мог быть сохранён; проверьте карточку. Эта форма повторно не отправляется.";
+      error.hidden = false; error.focus();
+    } catch (_) { error.textContent = revoked ? "Доступ изменился. Откройте страницу заново." : "Не удалось обновить доску. Повторите только загрузку данных."; error.hidden = false; refresh.hidden = revoked; error.focus(); }
     finally { pending = false; saving.hidden = true; saving.textContent = "Сохраняем действие…"; form.removeAttribute("aria-busy"); submit.disabled = phase !== "editing" || blocked || !chosen(); cancel.disabled = false; }
   }
   refresh.addEventListener("click", event => { event.preventDefault(); refreshAction(); });
@@ -358,10 +359,17 @@
         return;
       }
       const parsed = new DOMParser().parseFromString(await response.text(),"text/html");
-      const explanation = parsed.querySelector(".flash.error[role=alert] p")?.textContent?.trim();
-      if (response.status === 409) {
+      const fieldError = parsed.querySelector(".flash.error[role=alert] p");
+      const explanation = (fieldError?.textContent || parsed.body.textContent)?.trim();
+      if (response.status === 410) {
+        phase = "retired"; blocked = true; needsRead = true;
+        error.textContent = "Это действие больше не используется. Комментарий не отправлен. Обновите страницу и выберите доступное действие.";
+      } else if (response.status === 409) {
         phase = "conflict"; blocked = true; needsRead = true;
         error.textContent = "Задача уже изменена. Комментарий сохранён. Обновите данные перед новым действием.";
+      } else if (response.status === 400 && !fieldError) {
+        phase = "conflict"; blocked = true; needsRead = true;
+        error.textContent = "Не удалось проверить форму. Комментарий сохранён. Обновите данные перед новым действием.";
       } else if ([400,413,422].includes(response.status) && !response.redirected && explanation) {
         phase = "editing"; blocked = false; error.textContent = explanation.slice(0,500);
       } else {

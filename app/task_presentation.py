@@ -16,15 +16,9 @@ def task_progress(task, user):
     else:
         relationship = "Наш отдел выполнял" if task.status == "completed" else ("Поручение нашему отделу" if closed else "Наш отдел — исполнитель")
     stages = {
-        "draft": f"Поручение ещё не отправлено в отдел «{recipient}».",
-        "pending_approval": f"Начальник отдела «{sender}» согласует отправку поручения.",
-        "awaiting_assignment": f"Поручение передано отделу «{recipient}». Ожидается назначение исполнителя.",
-        "assigned": f"В отделе «{recipient}» назначен исполнитель поручения.",
-        "in_progress": f"Отдел «{recipient}» выполняет поручение.",
-        "awaiting_clarification": f"Отдел «{recipient}» ожидает уточнения от отдела «{sender}».",
-        "recipient_review": f"Готовый результат проверяет начальник отдела «{recipient}». Заказчику результат ещё не передан.",
-        "sender_acceptance": f"Готовый результат передан отделу «{sender}» на окончательную приёмку.",
-        "completed": f"Отдел «{sender}» принял результат. Поручение завершено.",
+        "new": (f"Поручение на доработке. В отделе «{recipient}» нужно назначить исполнителя." if task.is_rework else f"Поручение поступило отделу «{recipient}». Исполнитель ещё не назначен."),
+        "in_progress": (f"Поручение возвращено отделу «{recipient}» на доработку." if task.is_rework else f"Отдел «{recipient}» выполняет поручение."),
+        "completed": f"Отдел «{recipient}» отметил выполнение поручения. Отдельная приёмка не требуется.",
         "cancelled": f"Отдел «{sender}» отменил поручение." if dispatched else "Заявка отменена до отправки другому отделу.",
         "rejected": f"Отдел «{recipient}» отклонил поручение.",
     }

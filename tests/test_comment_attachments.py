@@ -1,4 +1,4 @@
-"""Private comment/action attachments, active policy and request-wide rollback."""
+"""Private comment/action attachments, fixed policy and request-wide rollback."""
 from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
@@ -26,7 +26,7 @@ class CommentAttachmentTests(PortalCase):
         self.app.config["TASK_UPLOAD_DIR"]=self.directory.name
         self.add_member("receiver",department_id=self.other_department_id)
         self.add_member("receiver-head",role="head",department_id=self.other_department_id)
-        self.draft=self.task()
+        self.fresh=self.task()
         self.sent=self.task(status="in_progress",sent_at=datetime.now(timezone.utc),
             assignee_id=self.ids["receiver"])
 
@@ -36,9 +36,8 @@ class CommentAttachmentTests(PortalCase):
 
     def login(self,username="employee",password=None,**kwargs):
         self.client=self.app.test_client()
-        response=super().login(username,password,**kwargs)
-        self.assertEqual(200,response.status_code)
-        return response
+        with self.client.session_transaction() as session:
+            session["_user_id"]=str(self.ids[username]);session["_fresh"]=True
 
     def revision(self,task_id):
         with self.app.app_context():return db.session.get(Task,task_id).revision
@@ -95,62 +94,54 @@ class CommentAttachmentTests(PortalCase):
         for _,name in ids:self.assertIn(name,page)
         self.assertFalse((Path(self.directory.name)/".pending").exists())
 
-    def test_plain_comment_is_allowed_and_does_not_answer_clarification(self):
-        with self.app.app_context():
-            db.session.get(Task,self.sent).status="awaiting_clarification"
-            db.session.commit()
-        self.assertEqual(302,self.post().status_code)
-        with self.app.app_context():
-            self.assertEqual("awaiting_clarification",db.session.get(Task,self.sent).status)
-            self.assertEqual(0,TaskAttachment.query.count())
+    def test_plain_comment_does_not_change_active_status_or_executor(self):
+        for ident in (self.fresh,self.sent):
+            with self.app.app_context():
+                task=db.session.get(Task,ident);before=(task.status,task.assignee_id,task.due_at)
+            self.assertEqual(302,self.post(task_id=ident,actor="receiver").status_code)
+            with self.app.app_context():
+                task=db.session.get(Task,ident)
+                self.assertEqual(before,(task.status,task.assignee_id,task.due_at))
+                self.assertEqual(0,TaskAttachment.query.count())
 
     def test_initial_multiple_files_share_description_without_duplicate_comments(self):
         self.login()
-        response=self.client.post("/tasks/new",data=self.draft_form(attachment=[self.upload(".pdf"),self.upload(".png")]))
+        form=self.creation_form(attachment=[self.upload(".pdf"),self.upload(".png")])
+        response=self.client.post("/tasks/new",data=form)
         self.assertEqual(302,response.status_code,response.get_data(as_text=True))
         ident=int(response.headers["Location"].rsplit("/",1)[1])
         with self.app.app_context():
             c=TaskComment.query.filter_by(task_id=ident).one()
             event=TaskEvent.query.filter_by(task_id=ident).one()
-            self.assertEqual(self.draft_form()["description"],c.body)
+            self.assertEqual(form["description"],c.body)
             self.assertEqual(2,TaskAttachment.query.filter_by(task_id=ident,comment_id=c.id).count())
             self.assertEqual(c.id,event.comment_id)
-            self.assertEqual("draft",db.session.get(Task,ident).status)
+            self.assertEqual("new",db.session.get(Task,ident).status)
 
-    def test_draft_edit_and_approval_actions_accept_their_comment_files(self):
-        self.login()
-        response=self.client.post(f"/tasks/{self.draft}/edit",data=self.draft_form(
-            revision="0",comment="Дополнен черновик",attachment=[self.upload(),self.upload(".png")]))
-        self.assertEqual(302,response.status_code)
-        response=self.client.post(f"/tasks/{self.draft}/approval/submit",data={
-            "revision":"1","comment":"Прошу согласовать","attachment":self.upload()})
-        self.assertEqual(302,response.status_code)
-        with self.app.app_context():
-            self.assertEqual(2,TaskComment.query.filter_by(task_id=self.draft).count())
-            self.assertEqual(3,TaskAttachment.query.filter_by(task_id=self.draft).count())
+    def test_removed_edit_approval_and_review_cannot_attach_files(self):
+        before=self.snapshot()
+        for suffix in ("edit","approval/submit","approval/approve","review/submit_result","review/complete"):
+            self.assertEqual(410,self.post(path=f"/tasks/{self.fresh}/{suffix}",files=self.upload()).status_code)
+        self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
 
-    def test_result_and_final_acceptance_files_belong_to_each_action(self):
-        self.assertEqual(302,self.post(actor="receiver",path=f"/tasks/{self.sent}/review/submit_result",
-            comment="Результат подготовлен",files=[self.upload(),self.upload(".docx")]).status_code)
-        self.assertEqual(302,self.post(actor="receiver-head",path=f"/tasks/{self.sent}/review/forward_result",files=self.upload(".png")).status_code)
-        self.assertEqual(302,self.post(actor="head",path=f"/tasks/{self.sent}/review/complete",files=self.upload()).status_code)
+    def test_completion_return_and_repeated_result_files_belong_to_each_action(self):
+        for actor,action,files in (("receiver","complete",[self.upload(),self.upload(".docx")]),
+                                  ("head","return",self.upload(".png")),("receiver","complete",self.upload())):
+            self.assertEqual(302,self.post(actor=actor,path=f"/tasks/{self.sent}/{action}",files=files).status_code)
         with self.app.app_context():
             task=db.session.get(Task,self.sent)
-            self.assertEqual("completed",task.status)
-            self.assertIsNotNone(task.completed_at)
+            self.assertEqual(("completed",1),(task.status,task.rework_cycle))
             events=TaskEvent.query.filter_by(task_id=self.sent).order_by(TaskEvent.id).all()
             self.assertEqual([2,1,1],[len(e.details["attachments"]) for e in events])
-            for e in events:
-                self.assertEqual(len(e.details["attachments"]),TaskAttachment.query.filter_by(comment_id=e.comment_id).count())
+            for event in events:
+                self.assertEqual(len(event.details["attachments"]),TaskAttachment.query.filter_by(comment_id=event.comment_id).count())
 
-    def test_assignment_comment_can_have_a_file_without_starting_work(self):
+    def test_assignment_starts_work_and_keeps_its_comment_file(self):
+        self.assertEqual(302,self.post(task_id=self.fresh,actor="receiver-head",path=f"/tasks/{self.fresh}/assign",
+            files=self.upload(),extra={"assignee_ids":str(self.ids["receiver"])}).status_code)
         with self.app.app_context():
-            task=db.session.get(Task,self.sent);task.status="awaiting_assignment";task.assignee_id=None
-            db.session.commit()
-        response=self.post(actor="receiver-head",path=f"/tasks/{self.sent}/execution/assign",
-            files=self.upload(),extra={"assignee_id":str(self.ids["receiver"])})
-        self.assertEqual(302,response.status_code)
-        with self.app.app_context():self.assertEqual("assigned",db.session.get(Task,self.sent).status)
+            self.assertEqual("in_progress",db.session.get(Task,self.fresh).status)
+            self.assertEqual(TaskEvent.query.one().comment_id,TaskAttachment.query.one().comment_id)
 
     def test_invalid_second_file_rolls_back_everything_and_cleans_staging(self):
         before=self.snapshot()
@@ -174,16 +165,16 @@ class CommentAttachmentTests(PortalCase):
 
     def test_foreign_comment_id_or_task_id_fields_cannot_rebind_files(self):
         before=self.snapshot()
-        for fields in ({"comment_id":"999"},{"task_id":str(self.draft)},{"uploaded_by_id":"1"},
+        for fields in ({"comment_id":"999"},{"task_id":str(self.fresh)},{"uploaded_by_id":"1"},
                        {"storage_key":"a"*32}):
             self.assertEqual(400,self.post(files=self.upload(),extra=fields).status_code)
             self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
 
     def test_service_refuses_foreign_comment_and_untrusted_metadata(self):
         with self.app.app_context():
-            foreign=TaskComment(task_id=self.draft,author_id=self.ids["employee"],body="Чужая задача")
+            foreign=TaskComment(task_id=self.fresh,author_id=self.ids["employee"],body="Чужая задача")
             db.session.add(foreign);db.session.flush()
-            event=TaskEvent(task_id=self.draft,actor_id=self.ids["employee"],comment_id=foreign.id,event_type="comment_added",details={})
+            event=TaskEvent(task_id=self.fresh,actor_id=self.ids["employee"],comment_id=foreign.id,event_type="comment_added",details={})
             db.session.add(event);db.session.commit()
             task=db.session.get(Task,self.sent);actor=db.session.get(User,self.ids["employee"])
             with UploadBatch() as batch:
@@ -194,15 +185,15 @@ class CommentAttachmentTests(PortalCase):
             db.session.rollback()
         self.assertEqual({},self.files())
 
-    def test_policy_size_boundary_and_disabled_formats_are_enforced(self):
-        self.policy(["png"],1)
+    def test_fixed_twenty_mb_boundary_ignores_legacy_settings(self):
+        self.policy(["pdf"],1)
         base=attachment_bytes(".png")
-        allowed=base+b"\0"*(1024*1024-len(base))
+        allowed=base+b"\0"*(20*1024*1024-len(base))
         self.assertEqual(302,self.post(files=self.upload(".png",data=allowed)).status_code)
         before=self.snapshot();old=self.files()
         self.assertEqual(413,self.post(files=self.upload(".png",data=allowed+b"x")).status_code)
-        self.assertEqual(400,self.post(files=self.upload(".pdf")).status_code)
         self.assertEqual(before,self.snapshot());self.assertEqual(old,self.files())
+        self.assertEqual(302,self.post(files=self.upload(".pdf")).status_code)
 
     def test_whole_request_stays_at_21_mb_and_does_not_create_partial_files(self):
         base=attachment_bytes(".png")
@@ -212,30 +203,77 @@ class CommentAttachmentTests(PortalCase):
         self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
         self.assertEqual(21*1024*1024,self.app.config["MAX_CONTENT_LENGTH"])
 
-    def test_disabled_uploads_still_allow_text_and_existing_downloads(self):
+    def test_legacy_empty_formats_do_not_disable_files_text_or_existing_downloads(self):
         self.assertEqual(302,self.post(files=self.upload()).status_code)
         with self.app.app_context():ident=TaskAttachment.query.one().id
         self.policy([])
-        self.assertEqual(400,self.post(files=self.upload()).status_code)
+        self.assertEqual(302,self.post(files=self.upload(".png")).status_code)
         self.assertEqual(302,self.post(comment="Только текст").status_code)
         response=self.client.get(f"/tasks/attachments/{ident}/download")
         self.assertEqual(200,response.status_code);response.close()
+        with self.app.app_context():self.assertEqual([],db.session.get(SystemSettings,1).allowed_extensions)
 
-    def test_policy_is_rechecked_after_preparation_before_final_install(self):
-        from app.storage import _current_policy
+    def test_staged_size_or_content_tampering_is_rejected_and_cleaned(self):
         before=self.snapshot()
-        from app.settings import UploadPolicy
-        with patch("app.storage._current_policy",side_effect=[UploadPolicy(),UploadPolicy(1,("png",))]):
-            self.assertEqual(400,self.post(files=self.upload()).status_code)
-        self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
+        for resize in (False,True):
+            with self.app.app_context(),self.assertRaises(UploadError):
+                with UploadBatch() as batch:
+                    batch.prepare(FileStorage(stream=BytesIO(attachment_bytes(".pdf")),filename="sample.pdf"))
+                    item=batch.prepared[0]
+                    item.path.write_bytes(b"x"*(item.size+(1 if resize else 0)))
+                    item.install()
+            self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
 
-    def test_open_form_cannot_bypass_subsequent_policy_change(self):
+    def test_macro_office_documents_cannot_disguise_as_allowed_formats(self):
+        from zipfile import ZipFile
+        for ext in (".docx", ".xlsx", ".pptx"):
+            source=BytesIO(attachment_bytes(ext));target=BytesIO()
+            with ZipFile(source) as original,ZipFile(target,"w") as output:
+                for name in original.namelist():output.writestr(name,original.read(name))
+                output.writestr("vbaProject.bin",b"synthetic macro")
+            before=self.snapshot()
+            self.assertEqual(400,self.post(files=self.upload(ext,data=target.getvalue())).status_code)
+            self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
+
+    def test_unbound_older_attachment_remains_readable_with_unchanged_bytes(self):
+        from app.storage import save_upload
+        original=attachment_bytes(".pdf")
+        with self.app.app_context():
+            metadata=save_upload(FileStorage(stream=BytesIO(original),filename="Прежний.pdf"))
+            row=TaskAttachment(task_id=self.sent,uploaded_by_id=self.ids["employee"],comment_id=None,**metadata)
+            db.session.add(row);db.session.commit();ident=row.id;key=row.storage_key
+        self.policy([])
+        self.assertEqual(302,self.post(files=self.upload(".png")).status_code)
+        with self.app.app_context():
+            row=db.session.get(TaskAttachment,ident)
+            self.assertIsNone(row.comment_id);self.assertEqual(key,row.storage_key)
+        self.assertEqual(original,Path(self.directory.name,key).read_bytes())
+        self.login("receiver")
+        response=self.client.get(f"/tasks/attachments/{ident}/download")
+        self.assertEqual(200,response.status_code);self.assertEqual(original,response.data);response.close()
+        self.assertIn("Прежний.pdf",self.client.get(f"/tasks/{self.sent}").get_data(as_text=True))
+
+    def test_invalid_legacy_extension_setting_neither_expands_nor_breaks_fixed_policy(self):
+        self.policy(["exe"],1)
+        with self.app.app_context():
+            from app.settings import get_upload_policy,SUPPORTED_EXTENSIONS
+            self.assertEqual(SUPPORTED_EXTENSIONS,get_upload_policy().allowed_extensions)
+            self.assertEqual(20,get_upload_policy().max_upload_mb)
+            self.assertEqual(["exe"],db.session.get(SystemSettings,1).allowed_extensions)
+        self.assertEqual(400,self.post(files=self.upload(name="file.exe")).status_code)
+        self.assertEqual(302,self.post(files=self.upload(".png")).status_code)
+
+    def test_open_form_and_new_upload_use_fixed_policy_after_legacy_settings_change(self):
         self.login()
         self.assertEqual(200,self.client.get(f"/tasks/{self.sent}").status_code)
-        self.policy(["png"])
-        self.assertEqual(400,self.client.post(f"/tasks/{self.sent}/comments",data={
-            "revision":"0","comment":"Старая форма","attachment":self.upload()}).status_code)
-        self.assertEqual({},self.files())
+        self.policy(["png"],1)
+        self.assertEqual(302,self.client.post(f"/tasks/{self.sent}/comments",data={
+            "revision":"0","comment":"Та же фиксированная политика","attachment":self.upload()}).status_code)
+        with self.app.app_context():
+            from app.settings import get_upload_policy
+            policy=get_upload_policy()
+            self.assertEqual(20,policy.max_upload_mb)
+            self.assertEqual(6,len(policy.allowed_extensions))
 
     def test_commit_failure_removes_only_new_files_and_keeps_old_materials(self):
         self.assertEqual(302,self.post(files=self.upload()).status_code)
@@ -254,7 +292,7 @@ class CommentAttachmentTests(PortalCase):
             return original(item)
         before=self.snapshot()
         with patch("app.storage.PreparedUpload.install",new=failing):
-            response=self.post(actor="receiver",path=f"/tasks/{self.sent}/review/submit_result",
+            response=self.post(actor="receiver",path=f"/tasks/{self.sent}/complete",
                 files=[self.upload(),self.upload(".png")])
         self.assertEqual(400,response.status_code)
         self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
@@ -274,21 +312,13 @@ class CommentAttachmentTests(PortalCase):
         self.assertEqual(500,response.status_code)
         self.assertEqual(before,self.snapshot());self.assertEqual({},self.files())
 
-    def test_draft_files_private_then_available_to_recipient_after_dispatch(self):
-        self.assertEqual(302,self.post(task_id=self.draft,files=self.upload()).status_code)
+    def test_new_task_files_are_private_to_both_departments_and_admin(self):
+        self.assertEqual(302,self.post(task_id=self.fresh,files=self.upload()).status_code)
         with self.app.app_context():ident=TaskAttachment.query.one().id
-        self.login("receiver")
-        self.assertEqual(404,self.client.get(f"/tasks/attachments/{ident}/download").status_code)
-        self.login("root")
-        response=self.client.get(f"/tasks/attachments/{ident}/download")
-        self.assertEqual(200,response.status_code);response.close()
-        self.login()
-        self.assertEqual(302,self.client.post(f"/tasks/{self.draft}/approval/submit",data={"revision":"1","comment":"Прошу согласовать"}).status_code)
-        self.login("head")
-        self.assertEqual(302,self.client.post(f"/tasks/{self.draft}/approval/approve",data={"revision":"2","comment":"Одобрено"}).status_code)
-        self.login("receiver")
-        response=self.client.get(f"/tasks/attachments/{ident}/download")
-        self.assertEqual(200,response.status_code);response.close()
+        for actor in ("employee","head","receiver","receiver-head","root"):
+            self.login(actor)
+            response=self.client.get(f"/tasks/attachments/{ident}/download")
+            self.assertEqual(200,response.status_code);response.close()
         self.login("outsider")
         self.assertEqual(404,self.client.get(f"/tasks/attachments/{ident}/download").status_code)
 

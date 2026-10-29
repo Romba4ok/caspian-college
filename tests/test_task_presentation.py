@@ -1,85 +1,48 @@
-"""Make issuing a task distinct from handing back its finished result."""
-
-from datetime import datetime, timezone
-
-from support.portal_fixtures import PortalCase
+"""Current five-state copy and rework marker never imply an approval stage."""
+from support.task_view_fixtures import ViewCase
 
 
-class TaskPresentationTests(PortalCase):
-    def setUp(self):
-        super().setUp()
-        self.add_member("receiver-head", role="head", department_id=self.other_department_id)
-        self.add_member("worker", department_id=self.other_department_id)
-        self.sent = datetime(2029, 1, 1, tzinfo=timezone.utc)
+class TaskPresentationTests(ViewCase):
+    def test_current_statuses_explained_in_boards_lists_details_and_panels(self):
+        for status,text in (("new","Исполнитель ещё не назначен"),("in_progress","выполняет поручение"),("completed","Отдельная приёмка не требуется"),("cancelled","отменил поручение"),("rejected","отклонил поручение")):
+            ident=self.card(status)
+            for actor,direction in (("employee","sent"),("worker","received")):
+                sources=[self.client_for(actor).get(f"/tasks/{ident}{suffix}").get_data(as_text=True) for suffix in ("","/panel")]
+                for view in ("list","board"):
+                    response,_=self.render("completed" if status in ("completed","cancelled","rejected") else direction,actor,view=view,scope="sent" if actor=="employee" else "received")
+                    # Compact active board cards communicate exact status; explanatory copy is in list/detail.
+                    if view=="list" or status in ("completed","cancelled","rejected"):sources.append(response.get_data(as_text=True))
+                for source in sources:self.assertIn(text,source)
 
-    def as_user(self, name):
-        self.client = self.app.test_client()
-        self.login(name)
+    def test_completed_directions_name_customer_and_executing_department(self):
+        self.card("completed")
+        self.card("completed",sender_department_id=self.other_department_id,recipient_department_id=self.department_id,author_id=self.ids["worker"])
+        for scope,label in (("sent","Наш отдел поручал"),("received","Наш отдел выполнял")):
+            response,_=self.render("completed",scope=scope);self.assertIn(label,response.get_data(as_text=True))
+            self.assertNotIn("принял результат",response.get_data(as_text=True))
 
-    def test_internal_and_customer_review_explained_in_list_board_and_details(self):
-        internal = self.task(status="recipient_review", sent_at=self.sent)
-        acceptance = self.task(status="sender_acceptance", sent_at=self.sent)
-        for user, direction in (("head", "sent"), ("receiver-head", "received")):
-            self.as_user(user)
-            for view in ("list", "board"):
-                html = self.client.get(f"/tasks/{direction}?view={view}").get_data(as_text=True)
-                self.assertIn("Задачи нашему отделу", html)
-                self.assertIn("Задачи другим отделам", html)
-                self.assertIn("Заказчику результат ещё не передан.", html)
-                self.assertIn("на окончательную приёмку.", html)
-            for task_id, text in ((internal, "Заказчику результат ещё не передан."),
-                                  (acceptance, "на окончательную приёмку.")):
-                for suffix in ("", "/panel"):
-                    html = self.client.get(f"/tasks/{task_id}{suffix}").get_data(as_text=True)
-                    self.assertIn(text, html)
-                    self.assertIn("Готовый результат", html)
+    def test_admin_copy_names_both_departments_without_own_department(self):
+        self.card("in_progress");response,_=self.render(actor="root",view="list");source=response.get_data(as_text=True)
+        self.assertIn("Заказчик:",source);self.assertIn("Исполняющий отдел:",source);self.assertNotIn("Наш отдел",source)
 
-    def test_completed_cards_identify_both_department_roles(self):
-        closed = dict(status="completed", sent_at=self.sent, completed_at=self.sent, closed_at=self.sent)
-        self.task(**closed)
-        self.task(**closed, author_id=self.ids["receiver-head"],
-                  sender_department_id=self.other_department_id, recipient_department_id=self.department_id)
-        self.as_user("head")
-        html = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
-        self.assertIn("Наш отдел поручал", html)
-        incoming = self.client.get("/tasks/completed?scope=received").get_data(as_text=True)
-        self.assertIn("Наш отдел выполнял", incoming)
-        self.assertEqual(1, html.count("принял результат. Поручение завершено."))
-        self.assertEqual(1, incoming.count("принял результат. Поручение завершено."))
+    def test_rework_is_marker_in_new_and_work_not_a_sixth_status(self):
+        for status in ("new","in_progress"):
+            ident=self.card(status,is_rework=True,rework_cycle=2)
+            for view in ("list","board"):
+                response,ctx=self.render(view=view);self.assertIn("На доработке",response.get_data(as_text=True));self.assertEqual(5,len(ctx["status_labels"]))
+                if view=="board":self.assertEqual((status,True,2),(self.cards(response)[ident]["group"],self.cards(response)[ident]["is_rework"],self.cards(response)[ident]["rework_cycle"]))
+            for suffix in ("","/panel"):self.assertIn("На доработке",self.client_for().get(f"/tasks/{ident}{suffix}").get_data(as_text=True))
 
-    def test_cancelled_draft_is_not_presented_as_dispatched(self):
-        self.task(status="cancelled", closed_at=self.sent)
-        self.as_user("head")
-        html = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
-        self.assertIn("Заявка нашего отдела", html)
-        self.assertIn("Заявка отменена до отправки другому отделу.", html)
+    def test_completion_clears_rework_marker_everywhere(self):
+        ident=self.card("in_progress",is_rework=True,rework_cycle=1);client=self.client_for("worker")
+        self.assertEqual(302,client.post(f"/tasks/{ident}/complete",data=dict(revision=0,comment="Исправлено")).status_code)
+        response,_=self.render("completed",scope="sent");self.assertFalse(self.cards(response)[ident]["is_rework"])
+        self.assertNotIn('class="task-rework"',response.get_data(as_text=True))
+        source=self.client_for().get(f"/tasks/{ident}/panel").get_data(as_text=True);self.assertNotIn('class="task-rework"',source)
 
-    def test_legacy_cancelled_task_uses_legacy_dispatch_marker(self):
-        self.task(status="cancelled", closed_at=self.sent, is_legacy_dispatched=True)
-        self.as_user("head")
-        html = self.client.get("/tasks/completed?scope=sent").get_data(as_text=True)
-        self.assertIn("отменил поручение.", html)
-        self.assertNotIn("Заявка отменена до отправки другому отделу.", html)
-
-    def test_rejection_does_not_claim_the_recipient_performed_the_task(self):
-        self.task(status="rejected", sent_at=self.sent, closed_at=self.sent)
-        self.as_user("receiver-head")
-        html = self.client.get("/tasks/completed?scope=received").get_data(as_text=True)
-        self.assertIn("Поручение нашему отделу", html)
-        self.assertIn("отклонил поручение.", html)
-        self.assertNotIn("Наш отдел выполнял", html)
-
-    def test_executor_action_explicitly_hands_result_to_own_head(self):
-        task_id = self.task(status="in_progress", sent_at=self.sent, assignee_id=self.ids["worker"])
-        self.as_user("worker")
-        html = self.client.get(f"/tasks/{task_id}").get_data(as_text=True)
-        self.assertIn("Передать результат начальнику своего отдела", html)
-        self.assertNotIn("Отправить поручение в другой отдел", html)
-
-    def test_admin_copy_does_not_claim_a_department(self):
-        self.task(status="sender_acceptance", sent_at=self.sent)
-        self.as_user("root")
-        html = self.client.get("/tasks/sent?view=list").get_data(as_text=True)
-        self.assertIn("Заказчик:", html)
-        self.assertIn("Исполняющий отдел:", html)
-        self.assertNotIn("Наш отдел — заказчик", html)
+    def test_active_views_do_not_advertise_retired_review_stages(self):
+        self.many(4)
+        for view in ("list","board"):
+            response,_=self.render(view=view);source=response.get_data(as_text=True)
+            for old in ("На согласовании","На проверке отдела-получателя","На приёмке отдела-отправителя","Заказчику результат ещё не передан"):
+                self.assertNotIn(old,source)

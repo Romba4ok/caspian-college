@@ -4,8 +4,8 @@
   <h2 class="task-panel-title">{{ task.title }}</h2>
   <div class="actions task-panel-links">
     <a class="button secondary-button" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">Полная страница задачи</a>
-    {% if task_actions %}<a class="button" data-panel-action data-task-id="{{ task.id }}" href="{{ url_for('tasks.task_detail', task_id=task.id) }}#task-permitted-actions">Действия с задачей</a>{% endif %}
-    {% if may_edit %}<a href="{{ url_for('tasks.task_edit', task_id=task.id) }}">Редактировать черновик</a>{% endif %}
+    {% if task_actions and task.status in ('new', 'in_progress') %}<a class="button" data-panel-action data-task-id="{{ task.id }}" href="{{ url_for('tasks.task_detail', task_id=task.id) }}#task-permitted-actions">Действия с задачей</a>{% endif %}
+    {% if task.status == 'completed' and 'return' in action_urls %}<a class="button" href="{{ url_for('tasks.task_detail', task_id=task.id) }}#task-permitted-actions">Вернуть на доработку</a>{% endif %}
     {% if may_contribute %}<a href="{{ url_for('tasks.task_detail', task_id=task.id) }}#task-discussion">Добавить комментарий</a>{% endif %}
   </div>
   {{ read.notices() }}

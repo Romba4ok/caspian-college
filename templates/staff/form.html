@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Изменить сотрудника' if employee else 'Новый сотрудник' }} · Caspian College{% endblock %}
+{% block content %}
+<section class="card form-card"><h1>{{ 'Изменить сотрудника' if employee else 'Новый сотрудник' }}</h1><p>Сотрудник отдела «{{ department.name }}». Роль и отдел назначаются автоматически.</p>
+{% if error %}<div class="flash error" role="alert" tabindex="-1" autofocus>{{ error }}</div>{% endif %}
+<form method="post" class="form-stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label for="staff-name">Полное имя</label><input id="staff-name" name="full_name" maxlength="160" required value="{{ request.form.get('full_name', employee.full_name if employee else '') }}">
+  <label for="staff-username">Логин</label><input id="staff-username" name="username" maxlength="80" autocomplete="off" required value="{{ request.form.get('username', employee.username if employee else '') }}">
+  <label for="staff-password">{{ 'Новый пароль' if employee else 'Пароль' }}</label><input id="staff-password" name="password" type="password" autocomplete="new-password" {% if not employee %}required{% endif %} aria-describedby="staff-password-hint">
+  <p class="hint" id="staff-password-hint">{% if employee %}Оставьте пустым, чтобы сохранить пароль. Смена пароля завершит прежние сеансы сотрудника.{% else %}Передайте сотруднику логин и пароль.{% endif %}</p>
+  <div class="actions"><button type="submit">Сохранить</button><a href="{{ url_for('staff.staff_list') }}">Отмена</a></div>
+</form></section>
+{% endblock %}

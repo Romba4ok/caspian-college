@@ -1,19 +1,19 @@
-"""Administrator account management with transactional audit and safe deletion."""
+"""Administrator account management with shared guards and soft deactivation."""
 from functools import wraps
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from . import ROLES
-from .audit import account_snapshot, actor_snapshot, record_admin_event
+from .accounts import AccountError, AccountConflict, create_account, update_account, set_account_blocked
+from .permissions import db_get
+
 from .extensions import db
-from .models import Department, Group, Task, TaskAttachment, TaskCategory, TaskComment, TaskEvent, TaskNotification, User, group_students
+from .models import Department, Task, User
 from .departments import (DepartmentError, archive_department, create_department, delete_department,
                           department_counts, rename_department, restore_department)
-from .settings import (SettingsError, SUPPORTED_EXTENSIONS, UploadPolicy, archive_category, create_category,
-                       get_upload_policy, rename_category, update_upload_policy)
 
 admin_bp = Blueprint("admin", __name__)
 EDITABLE_ROLES = {key: ROLES[key] for key in ("employee", "head")}
@@ -29,22 +29,6 @@ def admin_required(view):
     return wrapped
 
 
-def _lock_accounts(user_id=None):
-    ids = {current_user.id}
-    if user_id is not None:
-        ids.add(user_id)
-    # Keep authority changes exclusive without blocking concurrent notification FK checks.
-    users = db.session.execute(select(User).where(User.id.in_(ids)).order_by(User.id)
-        .with_for_update(key_share=True).execution_options(populate_existing=True)).scalars().all()
-    accounts = {user.id: user for user in users}
-    actor = accounts.get(current_user.id)
-    if actor is None or not actor.is_active or actor.role != "admin":
-        abort(403)
-    if user_id is not None and user_id not in accounts:
-        abort(404)
-    return accounts.get(user_id)
-
-
 @admin_bp.route("/admin/users")
 @admin_required
 def admin_users():
@@ -58,153 +42,94 @@ def _user_form_context(user=None):
             "departments": query.order_by(Department.name).all()}
 
 
-def _read_fields(user=None):
-    name = request.form.get("full_name", "").strip()
-    username = request.form.get("username", "").strip()
-    role = request.form.get("role", "")
-    allowed = {"admin"} if user and user.role == "admin" else EDITABLE_ROLES
-    if not name or len(name) > 160 or not username or len(username) > 80 or role not in allowed:
-        raise ValueError("Укажите имя до 160 символов, логин до 80 символов и допустимую роль")
-    raw_department = request.form.get("department_id", "").strip()
-    if role == "admin":
-        if raw_department:
-            raise ValueError("Администратору отдел не назначается")
-        return name, username, role, None
-    try:
-        department_id = int(raw_department)
-    except ValueError:
-        raise ValueError("Выберите существующий отдел") from None
-    department = db.session.execute(select(Department).where(Department.id == department_id)
-        .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
-    if department is None:
-        raise ValueError("Выбранный отдел не найден")
-    if department.is_archived and (user is None or user.department_id != department.id):
-        raise ValueError("Нельзя назначить пользователя в архивный отдел")
-    return name, username, role, department.id
+def _account_form_fields():
+    allowed={"csrf_token","full_name","username","password","role","department_id"}
+    _account_form_check(allowed)
+    return {key:request.form.get(key,"") for key in ("full_name","username","password","role","department_id")}
 
 
-def _form_error(message, user=None):
+def _account_form_check(allowed):
+    if set(request.form)-allowed or request.files or any(len(request.form.getlist(key))!=1 for key in request.form):
+        raise AccountError("Форма содержит неподдерживаемые или повторяющиеся поля")
+
+
+def _form_error(message, user=None, status=400):
     db.session.rollback()
-    flash(message, "error")
-    return render_template("admin_user_form.html", **_user_form_context(user)), 400
+    flash(message,"error")
+    return render_template("admin_user_form.html",**_user_form_context(user)),status
 
 
-@admin_bp.route("/admin/users/new", methods=["GET", "POST"])
+def _account_save(user_id=None):
+    user=db_get(User,user_id) if user_id is not None else None
+    if request.method=="GET":
+        return render_template("admin_user_form.html",**_user_form_context(user))
+    try:
+        fields=_account_form_fields()
+        if user_id is None:create_account(actor=current_user,**fields)
+        else:update_account(actor=current_user,user_id=user_id,**fields)
+        db.session.commit()
+    except PermissionError:
+        db.session.rollback();abort(403)
+    except LookupError:
+        db.session.rollback();abort(404)
+    except AccountError as error:
+        return _form_error(str(error),user,409 if isinstance(error,AccountConflict) else 400)
+    except IntegrityError:
+        return _form_error("Пользователь с таким логином уже существует или данные изменились. Проверьте отдел и роль.",user)
+    except SQLAlchemyError:
+        return _form_error("Не удалось сохранить учётную запись",user,500)
+    flash("Учётная запись сохранена","success")
+    return redirect(url_for("admin.admin_users"))
+
+
+@admin_bp.route("/admin/users/new",methods=["GET","POST"])
 @admin_required
 def admin_user_new():
-    if request.method == "POST":
-        _lock_accounts()
-        try:
-            name, username, role, department_id = _read_fields()
-            password = request.form.get("password", "")
-            if not password:
-                raise ValueError("Пароль обязателен при создании учётной записи")
-        except ValueError as error:
-            return _form_error(str(error))
-        user = User(full_name=name, username=username, role=role, department_id=department_id)
-        user.set_password(password)
-        try:
-            db.session.add(user)
-            db.session.flush()
-            record_admin_event("account_created", "user", user.id, after=dict(account_snapshot(user), password_changed=True))
-            db.session.commit()
-        except IntegrityError:
-            return _form_error("Пользователь с таким логином уже существует или данные изменились. Проверьте отдел и роль.")
-        flash("Учётная запись создана", "success")
-        return redirect(url_for("admin.admin_users"))
-    return render_template("admin_user_form.html", **_user_form_context())
+    return _account_save()
 
 
-@admin_bp.route("/admin/users/<int:user_id>/edit", methods=["GET", "POST"])
+@admin_bp.route("/admin/users/<int:user_id>/edit",methods=["GET","POST"])
 @admin_required
 def admin_user_edit(user_id):
-    user = _lock_accounts(user_id) if request.method == "POST" else db.get_or_404(User, user_id)
-    if request.method == "POST":
-        try:
-            name, username, role, department_id = _read_fields(user)
-        except ValueError as error:
-            return _form_error(str(error), user)
-        before, snapshot = account_snapshot(user), actor_snapshot(current_user)
-        user.full_name, user.username, user.role, user.department_id = name, username, role, department_id
-        password = request.form.get("password", "")
-        if password:
-            user.set_password(password)
-        try:
-            record_admin_event("account_updated", "user", user.id, before=before,
-                after=dict(account_snapshot(user), password_changed=bool(password)), snapshot=snapshot)
-            db.session.commit()
-        except IntegrityError:
-            return _form_error("Пользователь с таким логином уже существует или данные изменились. Проверьте отдел и роль.", user)
-        flash("Учётная запись обновлена", "success")
-        return redirect(url_for("admin.admin_users"))
-    return render_template("admin_user_form.html", **_user_form_context(user))
+    return _account_save(user_id)
 
 
-def _block_change(user_id, blocked):
-    user = _lock_accounts(user_id)
-    if user.role == "admin":
-        flash("Нельзя заблокировать последнего администратора" if blocked else "Администратор уже активен", "error" if blocked else "success")
-        return redirect(url_for("admin.admin_users"))
-    if not blocked and (user.role not in EDITABLE_ROLES or user.department_id is None):
-        flash("Перед разблокировкой назначьте пользователю отдел и роль", "error")
-        return redirect(url_for("admin.admin_users"))
-    if user.is_blocked != blocked:
-        before = account_snapshot(user)
-        user.is_blocked = blocked
-        record_admin_event("account_blocked" if blocked else "account_unblocked", "user", user.id,
-                           before=before, after=account_snapshot(user))
+def _block_change(user_id,blocked):
+    try:
+        _account_form_check({"csrf_token"})
+        set_account_blocked(actor=current_user,user_id=user_id,blocked=blocked)
         db.session.commit()
-    flash("Учётная запись заблокирована" if blocked else "Учётная запись разблокирована", "success")
+    except PermissionError:
+        db.session.rollback();abort(403)
+    except LookupError:
+        db.session.rollback();abort(404)
+    except AccountError as error:
+        db.session.rollback();flash(str(error),"error")
+        return render_template("admin_users.html",users=User.query.order_by(User.id).all(),roles=ROLES),409 if isinstance(error,AccountConflict) else 400
+    except SQLAlchemyError:
+        db.session.rollback();flash("Не удалось изменить доступ пользователя","error")
+        return render_template("admin_users.html",users=User.query.order_by(User.id).all(),roles=ROLES),500
+    flash("Учётная запись отключена" if blocked else "Доступ восстановлен","success")
     return redirect(url_for("admin.admin_users"))
 
 
-@admin_bp.route("/admin/users/<int:user_id>/block", methods=["POST"])
+@admin_bp.route("/admin/users/<int:user_id>/block",methods=["POST"])
 @admin_required
 def admin_user_block(user_id):
-    return _block_change(user_id, True)
+    return _block_change(user_id,True)
 
 
-@admin_bp.route("/admin/users/<int:user_id>/unblock", methods=["POST"])
+@admin_bp.route("/admin/users/<int:user_id>/unblock",methods=["POST"])
 @admin_required
 def admin_user_unblock(user_id):
-    return _block_change(user_id, False)
+    return _block_change(user_id,False)
 
 
-def _has_task_links(user_id):
-    links = [Task.query.filter(or_(Task.author_id == user_id, Task.assignee_id == user_id)).exists(),
-        TaskComment.query.filter_by(author_id=user_id).exists(), TaskAttachment.query.filter_by(uploaded_by_id=user_id).exists(),
-        TaskEvent.query.filter_by(actor_id=user_id).exists(), TaskNotification.query.filter_by(user_id=user_id).exists()]
-    return db.session.query(or_(*links)).scalar()
-
-
-def _has_legacy_links(user_id):
-    return db.session.query(or_(Group.query.filter_by(teacher_id=user_id).exists(),
-        db.session.query(group_students).filter(group_students.c.student_id == user_id).exists())).scalar()
-
-
-@admin_bp.route("/admin/users/<int:user_id>/delete", methods=["POST"])
+@admin_bp.route("/admin/users/<int:user_id>/delete",methods=["POST"])
 @admin_required
 def admin_user_delete(user_id):
-    user = _lock_accounts(user_id)
-    if user.role == "admin":
-        flash("Нельзя удалить последнего администратора", "error")
-        return redirect(url_for("admin.admin_users"))
-    if _has_task_links(user.id):
-        flash("Нельзя удалить учётную запись, связанную с задачами. Вместо удаления заблокируйте её.", "error")
-        return redirect(url_for("admin.admin_users"))
-    if _has_legacy_links(user.id):
-        flash("Нельзя удалить учётную запись с историческими данными групп. Вместо удаления заблокируйте её.", "error")
-        return redirect(url_for("admin.admin_users"))
-    try:
-        record_admin_event("account_deleted", "user", user.id, before=account_snapshot(user))
-        db.session.delete(user)
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        flash("Нельзя удалить учётную запись со связанными данными. Вместо удаления заблокируйте её.", "error")
-        return redirect(url_for("admin.admin_users"))
-    flash("Учётная запись удалена", "success")
-    return redirect(url_for("admin.admin_users"))
+    # Compatibility URL: account identity/history are never physically deleted.
+    return _block_change(user_id,True)
 
 
 @admin_bp.route("/admin/departments")
@@ -304,123 +229,45 @@ def admin_department_delete(department_id):
     return _department_action(department_id, delete_department, "Пустой отдел удалён")
 
 
-def _categories_response(*, error=None, editing_id=None):
-    counts = dict(db.session.execute(select(Task.category_id, func.count(Task.id))
-        .where(Task.category_id.is_not(None)).group_by(Task.category_id)).all())
-    return render_template("admin/categories.html", categories=TaskCategory.query.order_by(
-        TaskCategory.is_archived, TaskCategory.name, TaskCategory.id).all(),
-        task_counts=counts, error=error, editing_id=editing_id), 400 if error else 200
-
-
 @admin_bp.route("/admin/categories")
 @admin_required
 def admin_categories():
-    return _categories_response()
+    abort(410, description="Управление категориями больше не используется")
 
 
 @admin_bp.route("/admin/categories/new", methods=["POST"])
 @admin_required
 def admin_category_new():
-    try:
-        create_category(actor=current_user, name=request.form.get("name", ""))
-        db.session.commit()
-    except PermissionError:
-        db.session.rollback()
-        abort(403)
-    except SettingsError as error:
-        db.session.rollback()
-        return _categories_response(error=str(error))
-    except IntegrityError:
-        db.session.rollback()
-        return _categories_response(error="Название занято или данные изменились. Проверьте категорию.")
-    flash("Категория создана", "success")
-    return redirect(url_for("admin.admin_categories"))
+    abort(410, description="Управление категориями больше не используется")
 
 
 @admin_bp.route("/admin/categories/<int:category_id>/edit", methods=["POST"])
 @admin_required
 def admin_category_edit(category_id):
-    try:
-        rename_category(actor=current_user, category_id=category_id, name=request.form.get("name", ""))
-        db.session.commit()
-    except PermissionError:
-        db.session.rollback()
-        abort(403)
-    except LookupError:
-        db.session.rollback()
-        abort(404)
-    except SettingsError as error:
-        db.session.rollback()
-        return _categories_response(error=str(error), editing_id=category_id)
-    except IntegrityError:
-        db.session.rollback()
-        return _categories_response(error="Название занято или данные изменились. Проверьте категорию.", editing_id=category_id)
-    flash("Название категории изменено", "success")
-    return redirect(url_for("admin.admin_categories"))
+    abort(410, description="Управление категориями больше не используется")
 
 
 @admin_bp.route("/admin/categories/<int:category_id>/archive", methods=["POST"])
 @admin_required
 def admin_category_archive(category_id):
-    try:
-        archive_category(actor=current_user, category_id=category_id)
-        db.session.commit()
-    except PermissionError:
-        db.session.rollback()
-        abort(403)
-    except LookupError:
-        db.session.rollback()
-        abort(404)
-    except IntegrityError:
-        db.session.rollback()
-        flash("Не удалось архивировать категорию: данные изменились. Повторите действие.", "error")
-    else:
-        flash("Категория архивирована", "success")
-    return redirect(url_for("admin.admin_categories"))
-
-
-def _settings_response(policy, *, error=None, field=None):
-    selected = {value.strip().lower() for value in request.form.getlist("allowed_extensions")} if request.method == "POST" else set(policy.allowed_extensions)
-    return render_template("admin/settings.html", policy=policy, extensions=SUPPORTED_EXTENSIONS,
-        selected_extensions=selected, error=error, error_field=field), 400 if error else 200
+    abort(410, description="Управление категориями больше не используется")
 
 
 @admin_bp.route("/admin/settings", methods=["GET", "POST"])
 @admin_required
 def admin_settings():
-    if request.method == "POST":
-        try:
-            update_upload_policy(actor=current_user, max_upload_mb=request.form.get("max_upload_mb", ""),
-                                 allowed_extensions=request.form.getlist("allowed_extensions"))
-            db.session.commit()
-        except PermissionError:
-            db.session.rollback()
-            abort(403)
-        except SettingsError as error:
-            db.session.rollback()
-            return _settings_response(UploadPolicy(), error=str(error), field=error.field)
-        except IntegrityError:
-            db.session.rollback()
-            return _settings_response(UploadPolicy(), error="Настройки не сохранены: данные изменились. Повторите действие.")
-        flash("Настройки файлов сохранены", "success")
-        return redirect(url_for("admin.admin_settings"))
-    try:
-        policy = get_upload_policy()
-    except SettingsError:
-        return _settings_response(UploadPolicy(), error="Сохранённые настройки некорректны. Укажите допустимые значения и сохраните их.")
-    return _settings_response(policy)
+    abort(410, description="Страница настроек больше не используется")
 
 
 @admin_bp.route("/admin/statistics")
 @admin_required
 def admin_statistics():
-    from .reporting import global_statistics
-    from .tasks import STATUS_LABELS
+    from .reporting import global_statistics, report_status_labels
     try:
         report = global_statistics(current_user)
     except PermissionError:
         abort(403)
-    return render_template("admin/statistics.html", report=report, status_labels=STATUS_LABELS)
+    return render_template("admin/statistics.html", report=report, status_labels=report_status_labels())
 
 
 @admin_bp.route("/admin/audit")

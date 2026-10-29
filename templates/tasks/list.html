@@ -1,10 +1,11 @@
+{% from 'tasks/_assignees.html' import names as assignee_names %}
 {% extends 'base.html' %}
 {% block title %}{{ list_labels[direction] }} · Платформа отделов{% endblock %}
 {% block main_class %}task-workspace{% if view == 'board' %} task-board-workspace{% endif %}{% endblock %}
 {% block content %}
 <div class="page-heading task-page-heading">
   <div><p class="hint">{{ 'Все отделы · Просмотр администратора' if current_user.role == 'admin' else current_user.department.name }}</p>
-    <h1>Задачи</h1><p class="task-page-subtitle{% if view == 'board' %} sr-only{% endif %}">Поручения, согласования и результаты работы отделов.</p></div>
+    <h1>Задачи</h1><p class="task-page-subtitle{% if view == 'board' %} sr-only{% endif %}">Поручения и результаты работы отделов.</p></div>
   {% if may_create %}<a class="button" href="{{ url_for('tasks.task_new') }}">Новая задача</a>{% endif %}
 </div>
 {% if current_user.role != 'admin' and current_user.department.is_archived %}
@@ -30,7 +31,7 @@
   <a class="button secondary-button" href="{{ url_for('tasks.completed_tasks', scope='sent', view=view) }}" {% if completed_scope == 'sent' %}aria-current="page"{% endif %}>Задачи другим отделам</a>
 </nav>
 {% endif %}
-<p class="task-direction-help">{% if direction == 'completed' %}{{ 'Закрытые поручения всех отделов. На карточке указаны отдел-заказчик и исполняющий отдел.' if current_user.role == 'admin' else ('Закрытые поручения, поступившие нашему отделу.' if completed_scope == 'received' else 'Закрытые заявки и поручения нашего отдела другим отделам.') }}{% elif direction == 'received' %}{{ 'Поручения, поступившие в отделы-исполнители.' if current_user.role == 'admin' else 'Поручения, которые выполняет наш отдел.' }} Готовый результат сначала проверяет начальник исполняющего отдела, затем принимает отдел-заказчик.{% else %}{{ 'Поручения, которые отделы выдают друг другу, включая черновики.' if current_user.role == 'admin' else 'Наши поручения другим отделам, включая черновики и согласование отправки.' }} Передача готового результата на проверку — отдельный этап этого же поручения.{% endif %}</p>
+<p class="task-direction-help">{% if direction == 'completed' %}{{ 'Выполненные, отменённые и отклонённые поручения всех отделов.' if current_user.role == 'admin' else ('Закрытые поручения нашему отделу.' if completed_scope == 'received' else 'Закрытые поручения другим отделам.') }} Выполненную задачу автор или начальник отправителя может вернуть на доработку из карточки.{% elif direction == 'received' %}{{ 'Активные поручения, поступившие в отделы.' if current_user.role == 'admin' else 'Активные поручения нашему отделу.' }} Назначение или взятие сразу начинает работу. Выполнение не требует отдельной приёмки.{% else %}{{ 'Активные поручения, отправленные отделами.' if current_user.role == 'admin' else 'Активные поручения другим отделам.' }} Выполненные результаты находятся в «Завершённых», возврат на доработку снова делает задачу активной.{% endif %}</p>
 {% if view == 'board' %}
   {% include 'tasks/board.html' %}
 {% else %}
@@ -49,27 +50,27 @@
       {% if current_user.role == 'admin' or direction == 'completed' %}<p class="hint">Отправитель: {{ task.sender_department.name }} → Получатель: {{ task.recipient_department.name }}</p>
       {% else %}<p class="hint">{{ 'Отправитель:' if direction == 'received' else 'Получатель:' }} {{ task.sender_department.name if direction == 'received' else task.recipient_department.name }}</p>{% endif %}
       <p class="hint">Автор: {{ task.author.full_name }} · Создана: {{ task.created_at|task_datetime }}</p>
-      {% if task.status in ('draft', 'pending_approval') %}<p class="hint">Получателю пока не видна</p>{% endif %}
+      {% if task.is_rework %}<p class="task-rework"><strong>На доработке</strong></p>{% endif %}
       {% if direction == 'completed' %}<p class="hint">{{ 'Завершена' if task.status == 'completed' else ('Отменена' if task.status == 'cancelled' else 'Отклонена') }}: {{ task.completed_at|task_datetime if task.status == 'completed' and task.completed_at else (task.closed_at|task_datetime if task.status != 'completed' and task.closed_at else 'дата и время неизвестны (историческая запись)') }}</p>{% endif %}
     </div>
     <div class="task-card-side">
       <div><span class="hint">Срок · {{ config.TASK_TIMEZONE }}</span><strong>{{ task.due_at|task_datetime if task.due_at else 'Не указан — историческая задача' }}</strong><p class="task-clock{% if clock.overdue %} task-overdue{% endif %}">{{ clock.text }}</p></div>
-      <div><span class="hint">Исполнитель</span><strong>{{ task.assignee.full_name if task.assignee else 'Не назначен' }}</strong></div>
+      <div><span class="hint">Исполнители ({{ task.assignee_ids|length }})</span><strong>{{ assignee_names(task) }}</strong>{% if unavailable_assignees[task.id] %}<p class="hint">Нет доступных исполнителей — можно присоединиться или назначить состав.</p>{% endif %}</div>
       <a class="button secondary-button" href="{{ url_for('tasks.task_detail', task_id=task.id) }}">Открыть<span class="sr-only"> задачу «{{ task.title }}»</span></a>
     </div>
   </article>
   {% else %}
   <div class="card task-empty"><h2>{{ 'На этой странице задач нет' if pagination.total else 'Задач пока нет' }}</h2>
-    <p>{% if direction == 'received' %}Здесь появятся поручения, отправленные вашему отделу.{% elif direction == 'sent' %}Здесь находятся черновики, согласование и отправленные поручения.{% else %}Здесь появятся завершённые, отменённые и отклонённые задачи выбранного направления.{% endif %}</p>
-    {% if pagination.total %}<a href="{{ url_for(list_endpoints[direction]) }}">На первую страницу</a>{% elif direction == 'sent' and may_create %}<a class="button" href="{{ url_for('tasks.task_new') }}">Создать задачу</a>{% endif %}
+    <p>{% if direction == 'received' %}Здесь появятся поручения, отправленные вашему отделу.{% elif direction == 'sent' %}Здесь появятся активные поручения другим отделам.{% else %}Здесь появятся завершённые, отменённые и отклонённые задачи выбранного направления.{% endif %}</p>
+    {% if pagination.total %}<a href="{{ url_for(list_endpoints[direction],view='list',scope=completed_scope) }}">На первую страницу</a>{% elif direction == 'sent' and may_create %}<a class="button" href="{{ url_for('tasks.task_new') }}">Создать задачу</a>{% endif %}
   </div>
   {% endfor %}
 </section>
 {% endif %}
 {% if pagination.pages > 1 %}<nav class="actions task-pagination" aria-label="Страницы задач">
-  {% if pagination.has_prev %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.prev_num, view=view if direction != 'completed' else none, scope=completed_scope) }}">Назад</a>{% endif %}
+  {% if pagination.has_prev %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.prev_num, view=view, scope=completed_scope) }}">Назад</a>{% endif %}
   <span>Страница {{ pagination.page }} из {{ pagination.pages }}</span>
-  {% if pagination.has_next %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.next_num, view=view if direction != 'completed' else none, scope=completed_scope) }}">Далее</a>{% endif %}
+  {% if pagination.has_next %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], page=pagination.next_num, view=view, scope=completed_scope) }}">Далее</a>{% endif %}
 </nav>{% endif %}
 <script src="{{ url_for('static', filename='tasks.js') }}" defer></script>
 {% endblock %}

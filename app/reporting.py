@@ -7,7 +7,7 @@ from sqlalchemy import and_, case, func, select, true
 
 from .extensions import db
 from .models import Department, Task, TASK_STATUSES, User
-from .permissions import TERMINAL, dispatched_clause, is_platform_user, task_visibility_clause
+from .permissions import ACTIVE, dispatched_clause, is_platform_user, task_visibility_clause
 
 reports_bp = Blueprint("reports", __name__, url_prefix="/reports")
 
@@ -35,8 +35,8 @@ def _empty():
 def _metrics(scope, now, *, group=None):
     """One grouped query per direction; no task texts or account rows leave SQL."""
     valid = and_(Task.status == "completed", dispatched_clause(), Task.sent_at.is_not(None),
-        Task.completed_at.is_not(None), Task.completed_at >= Task.sent_at)
-    overdue = and_(dispatched_clause(), ~Task.status.in_(TERMINAL), Task.due_at.is_not(None), Task.due_at < now)
+        Task.completed_at.is_not(None), Task.completed_at >= Task.sent_at, Task.completed_at <= now)
+    overdue = and_(dispatched_clause(), Task.sent_at <= now, Task.status.in_(ACTIVE), Task.due_at.is_not(None), Task.due_at < now)
     if db.session.get_bind().dialect.name == "postgresql":
         hours = func.extract("epoch", Task.completed_at - Task.sent_at) / 3600.0
     else:
@@ -111,5 +111,9 @@ def own_department_report():
         report = department_report(current_user, department_id=int(raw[0]) if raw else None)
     except PermissionError:
         abort(403)
+    return render_template("reports/department.html", report=report, status_labels=report_status_labels())
+
+
+def report_status_labels():
     from .tasks import STATUS_LABELS
-    return render_template("reports/department.html", report=report, status_labels=STATUS_LABELS)
+    return {key:STATUS_LABELS[key] for key in TASK_STATUSES}

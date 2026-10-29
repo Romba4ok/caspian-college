@@ -89,3 +89,50 @@ class AccountAccessTests(PortalCase):
         self.assertEqual(400, self.client.post("/admin/users/new", data=self.form()).status_code)
         self.assertEqual(302, self.client.post(f'/admin/users/{self.ids["employee"]}/edit', data=self.form("employee", password="")).status_code)
         self.assertIsNone(self.account("created"))
+
+
+    def test_disable_and_restore_without_old_request_never_revives_old_session(self):
+        old=self.app.test_client();self.login("employee",client=old)
+        self.login();target=self.ids["employee"]
+        self.assertEqual(302,self.client.post(f"/admin/users/{target}/block").status_code)
+        self.assertEqual(302,self.client.post(f"/admin/users/{target}/unblock").status_code)
+        self.assertEqual(302,old.get("/tasks/received").status_code)
+        self.assertEqual(200,self.login("employee",client=old).status_code)
+
+    def test_legacy_id_only_cookie_cannot_survive_disable_restore_cycle(self):
+        old=self.app.test_client()
+        with old.session_transaction() as state:state["_user_id"]=str(self.ids["employee"]);state["_fresh"]=True
+        self.assertEqual(200,old.get("/tasks/received").status_code)
+        self.login();target=self.ids["employee"]
+        self.client.post(f"/admin/users/{target}/block");self.client.post(f"/admin/users/{target}/unblock")
+        self.assertEqual(302,old.get("/tasks/received").status_code)
+
+    def test_head_password_reset_revokes_old_session_without_exposing_hash(self):
+        old=self.app.test_client();self.login("employee",client=old)
+        with old.session_transaction() as state:
+            self.assertEqual(64,len(state["_auth_stamp"]))
+            self.assertNotIn("password_hash",state)
+        manager=self.app.test_client();self.login("head",client=manager)
+        self.assertEqual(302,manager.post(f'/staff/{self.ids["employee"]}/edit',data={
+            "full_name":"employee","username":"employee","password":"reset-secret"}).status_code)
+        self.assertEqual(302,old.get("/tasks/received").status_code)
+        self.assertEqual(200,self.login("employee",password="reset-secret",client=old).status_code)
+
+    def test_malformed_auth_stamp_and_user_id_do_not_raise_server_errors(self):
+        for key,value in (("_auth_stamp","ю"*64),("_auth_stamp",{}),("_user_id","9"*100),("_user_id","-1")):
+            client=self.app.test_client()
+            with client.session_transaction() as state:
+                state["_user_id"]=str(self.ids["employee"]);state[key]=value
+            self.assertEqual(302,client.get("/tasks/received").status_code)
+
+
+    def test_failed_login_transaction_never_leaves_authenticated_cookie(self):
+        from unittest.mock import patch
+        from sqlalchemy.exc import SQLAlchemyError
+        with patch("app.auth.db.session.commit",side_effect=SQLAlchemyError("synthetic-secret")):
+            response=self.client.post("/login",data={"username":"employee","password":"member-password"})
+        self.assertEqual(500,response.status_code);self.assertNotIn(b"synthetic-secret",response.data)
+        with self.client.session_transaction() as state:
+            self.assertNotIn("_user_id",state);self.assertNotIn("_auth_stamp",state)
+        self.assertEqual(302,self.client.get("/tasks/received").status_code)
+        self.assertEqual(200,self.login("employee").status_code)

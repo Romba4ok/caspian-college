@@ -2,7 +2,7 @@
 {% block title %}Уведомления · Платформа отделов{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <div><h1>Уведомления</h1><p>Ваши задачи, согласования и результаты. Непрочитанных: {{ unread_notification_count }}.</p></div>
+  <div><h1>Уведомления</h1><p>Поручения, результаты и изменения задач. Непрочитанных: {{ unread_notification_count }}.</p></div>
   <a href="{{ url_for('tasks.received_tasks') }}">К задачам</a>
 </div>
 <div class="actions">

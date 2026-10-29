@@ -1,6 +1,7 @@
 """Validated uploads stored outside the publicly served directory."""
 
 from io import BytesIO
+from hashlib import sha256
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -151,7 +152,8 @@ def discard_upload(storage_key):
 class UploadBatch:
     """Request-owned private staging; only its new files are removed on failure."""
 
-    def __init__(self):
+    def __init__(self, *, policy=None):
+        self.policy = policy
         self.prepared = []
         self.installed = []
         self.directory = None
@@ -164,9 +166,9 @@ class UploadBatch:
         if upload is None or not upload.filename:
             return
         filename, extension = _upload_name(upload.filename)
-        policy = _current_policy()
+        policy = self.policy or _current_policy()
         if extension.lstrip(".") not in policy.allowed_extensions:
-            raise UploadError("Этот формат вложений отключён в настройках")
+            raise UploadError("Разрешены только PDF, DOCX, XLSX, PPTX, JPG и PNG")
         data = upload.stream.read(policy.max_file_bytes + 1)
         if not data:
             raise UploadError("Пустые файлы не поддерживаются")
@@ -183,7 +185,7 @@ class UploadBatch:
             self.directory = pending / uuid4().hex
             self.directory.mkdir(mode=0o700)
         path = self.directory / uuid4().hex
-        self.prepared.append(PreparedUpload(self, path, filename, extension, len(data)))
+        self.prepared.append(PreparedUpload(self, path, filename, extension, len(data), sha256(data).hexdigest()))
         with path.open("xb") as output:
             output.write(data)
 
@@ -205,11 +207,8 @@ class UploadBatch:
 
 
 def _current_policy():
-    from .settings import get_upload_policy, SettingsError
-    try:
-        return get_upload_policy()
-    except SettingsError:
-        raise UploadError("Загрузка недоступна: проверьте файловые настройки системы") from None
+    from .settings import get_upload_policy
+    return get_upload_policy()
 
 
 def _upload_name(value):
@@ -224,26 +223,35 @@ def _upload_name(value):
 
 
 class PreparedUpload:
-    def __init__(self, batch, path, filename, extension, size):
+    def __init__(self, batch, path, filename, extension, size, content_sha256):
         self.batch, self.path = batch, path
         self.filename, self.extension, self.size = filename, extension, size
+        self.content_sha256 = content_sha256
         self.used = False
 
     def install(self):
         from shutil import copyfileobj
         if self.used:
             raise UploadError("Файл уже прикреплён")
-        policy = _current_policy()
+        policy = self.batch.policy or _current_policy()
         if self.extension.lstrip(".") not in policy.allowed_extensions or self.size > policy.max_file_bytes:
             raise UploadError("Вложение не соответствует действующим ограничениям формата или размера")
         if self.path.is_symlink() or self.path.resolve().parent != self.batch.directory.resolve():
             raise UploadError("Недопустимый путь временного файла")
+        if self.path.stat().st_size != self.size:
+            raise UploadError("Временный файл изменён. Загрузите его повторно")
         key = uuid4().hex
         target = attachment_path(key)
         descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self.batch.installed.append(key)
         with os.fdopen(descriptor, "wb") as output, self.path.open("rb") as source:
             copyfileobj(source, output)
+        digest = sha256()
+        with target.open("rb") as installed:
+            for chunk in iter(lambda: installed.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if target.stat().st_size != self.size or digest.hexdigest() != self.content_sha256:
+            raise UploadError("Временный файл изменён. Загрузите его повторно")
         self.used = True
         return dict(original_filename=self.filename,storage_key=key,
             content_type=MIME_TYPES[self.extension],size_bytes=self.size)

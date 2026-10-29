@@ -85,7 +85,7 @@ class TaskPanelTests(PortalCase):
 
     def test_shared_panel_identifies_current_user_after_account_switch(self):
         shared = self.sent()
-        hidden = self.task(title='Private sender draft')
+        hidden = self.task(title='Private foreign task', sender_department_id=self.third_department_id, recipient_department_id=self.department_id)
         self.as_user('employee')
         original = self.panel(shared)
         self.assertEqual(str(self.ids['employee']), original.headers['X-Task-User'])
@@ -95,7 +95,7 @@ class TaskPanelTests(PortalCase):
         self.assertEqual(str(self.ids['receiver-head']), current.headers['X-Task-User'])
         self.assertNotEqual(original.headers['X-Task-User'], current.headers['X-Task-User'])
         denied = self.panel(hidden, 404)
-        self.assertNotIn('Private sender draft', denied.get_data(as_text=True))
+        self.assertNotIn('Private foreign task', denied.get_data(as_text=True))
         self.assertNotIn('X-Task-User', denied.headers)
 
     def test_other_department_and_unknown_task_return_no_private_data(self):
@@ -106,12 +106,11 @@ class TaskPanelTests(PortalCase):
             self.assertNotIn('Строго приватное поручение',response.get_data(as_text=True))
             self.assertNotIn('X-Task-Panel',response.headers)
 
-    def test_recipient_cannot_read_presend_or_cancelled_presend(self):
-        ids=[self.task(status=s) for s in ('draft','pending_approval','cancelled')]
-        self.as_user('receiver-head')
-        for task_id in ids:self.panel(task_id,404)
-        self.as_user('head')
-        for task_id in ids:self.panel(task_id)
+    def test_all_five_current_states_visible_to_both_participating_departments(self):
+        ids=[self.task(status=status) for status in ('new','in_progress','completed','cancelled','rejected')]
+        for name in ('receiver-head','head'):
+            self.as_user(name)
+            for task_id in ids:self.panel(task_id)
 
     def test_anonymous_is_redirected_without_cacheable_private_fragment(self):
         task_id=self.sent()
@@ -145,7 +144,7 @@ class TaskPanelTests(PortalCase):
         self.assertNotIn('#task-permitted-actions',html);self.assertNotIn('#task-discussion',html)
         self.assertIn('Просмотр администратора',html)
         self.as_user('head');html=self.panel(closed).get_data(as_text=True)
-        self.assertIn('Завершена:',html);self.assertNotIn('#task-permitted-actions',html)
+        self.assertIn('Завершена:',html);self.assertIn('Вернуть на доработку',html);self.assertNotIn('data-panel-action',html)
         self.assertNotIn('#task-discussion',html)
 
     def test_user_text_is_escaped_in_description_comments_files_and_history(self):
@@ -171,12 +170,11 @@ class TaskPanelTests(PortalCase):
         for i in range(3):self.panel(task_id)
         self.assertEqual(before,snapshot())
 
-    def test_historical_missing_deadline_warning_matches_full_page(self):
-        task_id=self.sent(due_at=None,legacy_missing_due=True,is_legacy_dispatched=True);self.as_user('receiver-head')
+    def test_unknown_completion_date_is_not_fabricated_in_panel_or_full_page(self):
+        task_id=self.task(status='completed', completed_at=None);self.as_user('receiver-head')
         for path in (f'/tasks/{task_id}',f'/tasks/{task_id}/panel'):
             html=self.client.get(path).get_data(as_text=True)
-            self.assertIn('У исторической задачи не указан срок.',html)
-            self.assertIn('пока начальник отдела-отправителя не заполнит срок',html)
+            self.assertIn('дата и время неизвестны (историческая запись)',html)
 
     def test_board_keeps_ordinary_links_and_only_one_preview_shell(self):
         task_id=self.sent();self.as_user('receiver-head')

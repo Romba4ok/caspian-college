@@ -1,10 +1,11 @@
+{% from 'tasks/_assignees.html' import names as assignee_names %}
 {% macro notices() -%}
 {% if attention_label %}<p class="task-notice">{{ attention_label }}</p>{% endif %}
-{% if task.status in ('completed', 'cancelled', 'rejected') %}<p class="task-notice">Задача закрыта. Доступны просмотр истории и скачивание материалов.</p>{% elif current_user.role == 'admin' %}<p class="task-notice">Просмотр администратора. Действия и обсуждение доступны участникам отделов.</p>{% endif %}
+{% if task.status == 'completed' %}<p class="task-notice">Задача выполнена. Результат и материалы сохранены. Автор или начальник отдела-отправителя может вернуть её на доработку; после возврата снова доступны обсуждение и новые файлы.</p>{% elif task.status in ('cancelled', 'rejected') %}<p class="task-notice">Задача закрыта окончательно. Доступны просмотр истории и скачивание материалов; добавлять комментарии и файлы нельзя.</p>{% elif current_user.role == 'admin' %}<p class="task-notice">Просмотр администратора. Действия и обсуждение доступны участникам отделов.</p>{% endif %}
 {%- endmacro %}
 
 {% macro badges() -%}
-<div class="task-detail-badges">{% if deadline_state.overdue %}<span class="task-overdue">Просрочена</span>{% endif %}<span class="task-status status-{{ task.status }}">{{ t(status_labels[task.status]) }}</span><span class="task-priority">{{ t(priority_labels[task.priority]) }} {{ t('приоритет') }}</span></div>
+<div class="task-detail-badges">{% if deadline_state.overdue %}<span class="task-overdue">Просрочена</span>{% endif %}<span class="task-status status-{{ task.status }}">{{ t(status_labels[task.status]) }}</span>{% if task.is_rework %}<strong class="task-rework">На доработке</strong>{% endif %}<span class="task-priority">{{ t(priority_labels[task.priority]) }} {{ t('приоритет') }}</span></div>
 {%- endmacro %}
 
 {% macro facts() -%}
@@ -17,16 +18,13 @@
     <div><dt>Готовый результат</dt><dd>{{ task.recipient_department.name }} → {{ task.sender_department.name }}</dd></div>
   </dl>
 </section>
-{% if task.status in ('draft', 'pending_approval') %}
-    <p class="hint">Отдел-получатель пока не видит эту задачу. {% if task.status == 'pending_approval' %}Содержимое зафиксировано на время согласования.{% endif %}</p>
-    {% endif %}
     <h2>{{ t('Описание') }}</h2>
     <div class="task-description">{{ task.description }}</div>
     <dl class="task-facts">
       <div><dt>{{ t('Автор') }}</dt><dd>{{ task.author.full_name }}</dd></div>
       <div><dt>{{ t('Отдел-отправитель') }}</dt><dd>{{ t(task.sender_department.name) }}</dd></div>
       <div><dt>{{ t('Отдел-получатель') }}</dt><dd>{{ t(task.recipient_department.name) }}</dd></div>
-      <div><dt>{{ t('Исполнитель') }}</dt><dd>{{ task.assignee.full_name if task.assignee else t('Пока не назначен') }}</dd></div>
+      <div><dt>Исполнители ({{ task.assignee_ids|length }})</dt><dd>{{ assignee_names(task) }}</dd></div>
       <div><dt>{{ t('Срок (') }}{{ config.TASK_TIMEZONE }})</dt><dd>{{ task.due_at|task_datetime }}</dd></div>
       <div><dt>Оставшееся время</dt><dd class="task-clock{% if deadline_state.overdue %} task-overdue{% endif %}">{{ deadline_state.text }}</dd></div>
       <div><dt>{{ t('Категория') }}</dt><dd>{{ task.category or t('Не указана') }}</dd></div>
@@ -68,6 +66,6 @@
     <p class="hint" role="status">У исторической задачи не указан срок. Рабочие действия недоступны, пока начальник отдела-отправителя не заполнит срок.</p>
     {% endif %}
     {% if unavailable_assignee and task.status not in ('completed', 'cancelled', 'rejected') %}
-    <p class="hint" role="status">Исполнитель недоступен для работы. Начальнику отдела-получателя необходимо переназначить задачу.</p>
+    <p class="hint" role="status">Нет доступных исполнителей. Можно присоединиться к задаче или назначить состав через начальника отдела-получателя.</p>
     {% endif %}
 {%- endmacro %}

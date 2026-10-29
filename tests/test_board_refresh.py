@@ -1,120 +1,73 @@
-"""Read-after-write board fragments obey the original privacy/workflow boundary."""
-from datetime import datetime, timezone
-from html import unescape
-import json
-import re
-
+"""Fragments reflect real actions without leaking data or resetting identity."""
 from app.extensions import db
-from app.models import Task, TaskComment, TaskEvent, TaskNotification, User
-from support.portal_fixtures import PortalCase
+from app.models import User
+from support.task_view_fixtures import ViewCase
 from test_task_board import BoardMarkup
 
 
-class BoardRefreshTests(PortalCase):
-    def setUp(self):
-        super().setUp()
-        self.add_member('worker',department_id=self.other_department_id)
-        self.add_member('receiver-head',role='head',department_id=self.other_department_id)
+class BoardRefreshTests(ViewCase):
+    def fragment(self,client=None,direction="sent",**query):
+        response=(client or self.client_for()).get(f"/tasks/{direction}",query_string=dict(view="board",fragment="board",page=999)|query)
+        self.assertIn("no-store",response.headers.get("Cache-Control",""));return response
 
-    def as_user(self,name='employee'):
-        self.client=self.app.test_client();self.login(name)
+    def test_fragment_matches_all_initial_cards_and_counts_without_dialogs(self):
+        ids=self.many(36);initial,_=self.render();response=self.fragment()
+        self.assertEqual(200,response.status_code);self.assertEqual(set(ids),set(self.cards(response)));self.assertEqual(self.cards(initial),self.cards(response))
+        markup=BoardMarkup(response.get_data(as_text=True));self.assertEqual(36,markup.counts["sent"]);self.assertEqual(0,markup.dialog_count)
+        self.assertEqual(36,sum(len(g["ids"]) for g in markup.columns.values()))
+        self.assertEqual("sent",response.headers["X-Task-Board"]);self.assertEqual(str(self.ids["employee"]),response.headers["X-Task-User"])
+        for forbidden in ("<script","<form","<html","task-panel-dialog","board-dialog"):self.assertNotIn(forbidden,response.get_data(as_text=True))
 
-    def fragment(self,direction='sent',status=200):
-        response=self.client.get(f'/tasks/{direction}?view=board&fragment=board&page=999')
-        self.assertEqual(status,response.status_code)
-        self.assertIn('no-store',response.headers.get('Cache-Control',''))
-        return response
+    def test_fragment_keeps_visibility_and_identity_for_departments_and_admin(self):
+        ident=self.card();self.foreign()
+        received=self.fragment(self.client_for("worker"),"received");self.assertEqual({ident},set(self.cards(received)))
+        foreign=self.fragment(self.client_for("peer"),"sent");self.assertEqual({},self.cards(foreign))
+        admin=self.fragment(self.client_for("root"));self.assertEqual(2,len(self.cards(admin)))
+        self.assertNotEqual(received.headers["X-Task-User"],admin.headers["X-Task-User"])
 
-    def cards(self,response):
-        return {c['id']:c for c in (json.loads(unescape(v)) for v in re.findall(r'data-board-task="([^"]+)"',response.get_data(as_text=True)))}
+    def test_anonymous_or_disabled_session_never_gets_fragment(self):
+        self.card();self.assertEqual(302,self.fragment(self.app.test_client()).status_code)
+        client=self.client_for()
+        with self.app.app_context():db.session.get(User,self.ids["employee"]).is_blocked=True;db.session.commit()
+        response=self.fragment(client);self.assertEqual(302,response.status_code);self.assertNotIn(b"data-board-root",response.data)
 
-    def sent(self,**changes):
-        return self.task(**(dict(status='in_progress',sent_at=datetime.now(timezone.utc),assignee_id=self.ids['worker'])|changes))
+    def test_explicit_list_or_unknown_fragment_is_bad_request(self):
+        for query in (dict(view="list"),dict(fragment="unknown")):
+            response=self.fragment(**query);self.assertEqual(400,response.status_code)
 
-    def test_complete_fragment_matches_initial_board_and_all_counts(self):
-        ids=self.task_batch(36,statuses=('awaiting_assignment','assigned','in_progress','awaiting_clarification','recipient_review','sender_acceptance'),assignee_id=self.ids['worker'])
-        self.as_user()
-        fresh=self.fragment();html=fresh.get_data(as_text=True)
-        initial=self.client.get('/tasks/sent?view=board')
-        self.assertEqual(self.cards(initial),self.cards(fresh))
-        self.assertEqual(set(ids),set(self.cards(fresh)))
-        markup=BoardMarkup(html);self.assertEqual(36,markup.counts['sent'])
-        self.assertEqual(36,sum(len(g['ids']) for g in markup.columns.values()))
-        self.assertEqual(0,markup.dialog_count)
-        for forbidden in ('<script','<form','<html','task-panel-dialog','board-dialog'):
-            self.assertNotIn(forbidden,html)
-        self.assertEqual('sent',fresh.headers['X-Task-Board'])
-        self.assertEqual(str(self.ids['employee']),fresh.headers['X-Task-User'])
+    def test_assign_release_claim_and_reassign_refresh_real_status_revision_and_actions(self):
+        ident=self.card();head=self.client_for("receiver-head");worker=self.client_for("worker");peer=self.client_for("peer")
+        steps=((head,"assign",{"assignee_ids":self.ids["worker"]},"in_progress",self.ids["worker"]),
+            (worker,"release",{},"new",None),(peer,"claim",{},"in_progress",self.ids["peer"]),
+            (head,"reassign",{"assignee_ids":self.ids["worker"]},"in_progress",self.ids["worker"]))
+        for revision,(client,action,extra,status,assignee) in enumerate(steps):
+            response=client.post(f"/tasks/{ident}/{action}",data=dict(revision=revision,comment="Пояснение действия")|extra)
+            self.assertEqual(302,response.status_code)
+            card=self.cards(self.fragment(head,"received"))[ident]
+            self.assertEqual((status,status,revision+1,[] if assignee is None else [assignee],revision+1),(card["status"],card["group"],card["revision"],card["assignee_ids"],card["comment_count"]))
 
-    def test_receiver_fragment_excludes_presend_and_foreign_tasks(self):
-        active=self.sent();hidden=self.task(title='Не показывать получателю')
-        foreign=self.task(sender_department_id=self.third_department_id,recipient_department_id=self.department_id)
-        self.as_user('receiver-head');response=self.fragment('received')
-        self.assertEqual({active},set(self.cards(response)))
-        self.assertNotIn('Не показывать получателю',response.get_data(as_text=True))
-        self.assertNotIn(hidden,self.cards(response));self.assertNotIn(foreign,self.cards(response))
+    def test_stale_action_conflicts_and_read_gets_latest_revision(self):
+        ident=self.card();worker=self.client_for("worker");peer=self.client_for("peer")
+        payload=dict(revision=0,comment="Назначаю себя")
+        self.assertEqual(302,worker.post(f"/tasks/{ident}/claim",data=payload).status_code);before=self.snapshot()
+        self.assertEqual(409,peer.post(f"/tasks/{ident}/claim",data=payload).status_code);self.assertEqual(before,self.snapshot())
+        card=self.cards(self.fragment(peer,"received"))[ident];self.assertEqual(("in_progress",1,[self.ids["worker"]]),(card["status"],card["revision"],card["assignee_ids"]))
 
-    def test_other_department_has_an_empty_private_fragment(self):
-        self.sent(title='Конфиденциальное поручение');self.as_user('outsider')
-        for direction in ('received','sent'):
-            response=self.fragment(direction)
-            self.assertEqual({},self.cards(response))
-            self.assertNotIn('Конфиденциальное поручение',response.get_data(as_text=True))
+    def test_complete_return_and_complete_move_cards_and_counts(self):
+        ident=self.card("in_progress");worker=self.client_for("worker");sender=self.client_for()
+        for cycle in range(2):
+            revision=cycle*2
+            self.assertEqual(302,worker.post(f"/tasks/{ident}/complete",data=dict(revision=revision,comment="Работа выполнена")).status_code)
+            active=self.fragment();self.assertNotIn(ident,self.cards(active));self.assertEqual({"sent":0,"received":0,"completed":1},BoardMarkup(active.get_data(as_text=True)).counts)
+            closed=self.fragment(direction="completed",scope="sent");card=self.cards(closed)[ident]
+            self.assertEqual(("completed",[],False),(card["status"],card["actions"],card["is_rework"]))
+            if cycle==0:
+                self.assertEqual(302,sender.post(f"/tasks/{ident}/return",data=dict(revision=1,comment="Уточните результат")).status_code)
+                card=self.cards(self.fragment())[ident];self.assertEqual(("in_progress",True,1),(card["group"],card["is_rework"],card["rework_cycle"]))
+                self.assertEqual({},self.cards(self.fragment(direction="completed",scope="sent")))
 
-    def test_anonymous_and_blocked_do_not_get_a_private_fragment(self):
-        self.sent();self.fragment(status=302)
-        self.as_user('employee')
-        with self.app.app_context():
-            db.session.get(User,self.ids['employee']).is_blocked=True;db.session.commit()
-        response=self.fragment(status=302)
-        self.assertNotIn('data-board-root',response.get_data(as_text=True))
-
-    def test_user_header_changes_when_session_changes(self):
-        self.sent();self.as_user();one=self.fragment().headers['X-Task-User']
-        self.as_user('root');two=self.fragment().headers['X-Task-User']
-        self.assertNotEqual(one,two)
-
-    def test_fragment_flag_cannot_turn_explicit_list_into_a_board(self):
-        self.as_user()
-        for path in ('/tasks/completed?view=list&fragment=board','/tasks/sent?view=list&fragment=board','/tasks/sent?view=board&fragment=unknown'):
-            response=self.client.get(path)
-            self.assertEqual(400,response.status_code)
-            self.assertIn('no-store',response.headers['Cache-Control'])
-
-    def test_assignment_refreshes_exact_status_candidates_and_revision(self):
-        task_id=self.sent(status='awaiting_assignment',assignee_id=None)
-        self.as_user('receiver-head')
-        response=self.client.post(f'/tasks/{task_id}/execution/assign',data={'revision':'0','assignee_id':str(self.ids['worker']),'comment':'Назначаю ответственного'})
-        self.assertEqual(302,response.status_code)
-        card=self.cards(self.fragment('received'))[task_id]
-        self.assertEqual(('assigned','to_do',1,self.ids['worker']),(card['status'],card['group'],card['revision'],card['assignee_id']))
-        self.assertNotIn('assign',{a['key'] for a in card['actions']})
-        self.assertIn('start',{a['key'] for a in card['actions']})
-        self.assertEqual(1,card['comment_count'])
-
-    def test_conflict_then_read_has_new_revision_without_duplicate_event(self):
-        task_id=self.sent(status='assigned');self.as_user('receiver-head')
-        path=f'/tasks/{task_id}/execution/start'
-        self.assertEqual(302,self.client.post(path,data={'revision':'0','comment':'Первый клиент'}).status_code)
-        response=self.client.post(path,data={'revision':'0','comment':'Комментарий второго клиента'})
-        self.assertEqual(409,response.status_code)
-        with self.app.app_context():
-            self.assertIsNone(TaskComment.query.filter_by(task_id=task_id,body='Комментарий второго клиента').first())
-        card=self.cards(self.fragment('received'))[task_id]
-        self.assertEqual(('in_progress','working',1),(card['status'],card['group'],card['revision']))
-        with self.app.app_context():self.assertEqual(1,TaskEvent.query.filter_by(task_id=task_id).count())
-
-    def test_completion_removes_card_and_updates_all_tab_counts(self):
-        task_id=self.sent(status='sender_acceptance');self.as_user('head')
-        self.assertEqual(302,self.client.post(f'/tasks/{task_id}/review/complete',data={'revision':'0','comment':'Результат принят'}).status_code)
-        response=self.fragment();self.assertNotIn(task_id,self.cards(response))
-        self.assertEqual({'sent':0,'received':0,'completed':1},BoardMarkup(response.get_data(as_text=True)).counts)
-
-    def test_fragment_reads_write_nothing_and_escape_user_text(self):
-        self.sent(title='<img src=x onerror=alert(1)>');self.as_user()
-        def snapshot():
-            with self.app.app_context():return [(t.id,t.revision,t.status) for t in Task.query.all()],TaskEvent.query.count(),TaskComment.query.count(),TaskNotification.query.count()
-        before=snapshot()
-        for i in range(3):
-            html=self.fragment().get_data(as_text=True);self.assertNotIn('<img src=x',html);self.assertIn('&lt;img',html)
-        self.assertEqual(before,snapshot())
+    def test_refresh_escapes_text_and_writes_nothing(self):
+        self.card(title="<script>BAD</script>");before=self.snapshot()
+        for _ in range(3):
+            source=self.fragment().get_data(as_text=True);self.assertNotIn("<script>",source);self.assertIn("&lt;script&gt;",source)
+        self.assertEqual(before,self.snapshot())

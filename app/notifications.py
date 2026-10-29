@@ -48,7 +48,8 @@ def task_notification_recipients(task, *, creation=False):
             role="teacher", department_id=task.recipient_department_id, is_blocked=False,
         ).all()
     else:
-        ids = {task.author_id, task.assignee_id} - {None}
+        ids = {task.author_id} | (set(task.assignee_ids) if inspect(db.session.connection()).has_table("task_assignees")
+            else {task.legacy_assignee_id} - {None})
         candidates = User.query.filter(User.id.in_(ids)).all()
     # Only the pre-upgrade, request-free reminder CLI may still read revision 04.
     # Never use this bridge in HTTP authorization or on the new workflow schema.
@@ -93,15 +94,17 @@ EVENT_LABELS = {
     "approval_returned": "Заявка возвращена автору",
     "approved_and_sent": "Задача одобрена и отправлена",
     "sent": "Задача отправлена",
-    "assigned": "Назначен исполнитель",
-    "reassigned": "Исполнитель изменён",
+    "assigned": "Состав исполнителей назначен",
+    "reassigned": "Состав исполнителей изменён",
+    "claimed": "Сотрудник взял задачу",
+    "released": "Исполнитель снял задачу с себя",
     "work_started": "Работа начата",
     "clarification_requested": "Запрошено уточнение",
     "clarification_answered": "Получен ответ на уточнение",
     "result_submitted": "Результат поступил на внутреннюю проверку",
     "result_forwarded": "Результат поступил на окончательную приёмку",
     "returned_for_revision": "Результат возвращён на доработку",
-    "completed": "Задача завершена",
+    "completed": "Задача выполнена",
     "cancelled": "Задача отменена",
     "rejected": "Задача отклонена получателем",
     "deadline_changed": "Срок задачи изменён",
@@ -128,12 +131,11 @@ def _stage_heads(task, sender_heads, recipient_heads):
     return recipient_heads
 
 
-REMINDER_STATUSES = ("awaiting_assignment", "assigned", "in_progress",
-    "awaiting_clarification", "recipient_review", "sender_acceptance")
+REMINDER_STATUSES = ("new", "in_progress")
 
 
-def reminder_notification_recipients(task, *, candidates=None):
-    """Author and current stage owners; no actor to exclude in a system reminder.
+def reminder_notification_recipients(task, *, candidates=None, assignee_ids=None):
+    """Author, receiving heads and available executor; no system actor to exclude.
 
     The job supplies locked accounts. Direct callers get fresh account records.
     An assignee who moved out of the receiving department is no longer an owner,
@@ -142,59 +144,48 @@ def reminder_notification_recipients(task, *, candidates=None):
     from .permissions import is_task_dispatched
     if not is_task_dispatched(task) or task.status not in REMINDER_STATUSES or task.due_at is None:
         return []
+    roster = set(task.assignee_ids if assignee_ids is None else assignee_ids)
     if candidates is None:
-        candidates = User.query.filter(or_(User.id.in_({task.author_id, task.assignee_id} - {None}),
+        candidates = User.query.filter(or_(User.id.in_({task.author_id} | roster),
             and_(User.role == "head", User.department_id.in_(
                 (task.sender_department_id, task.recipient_department_id))))).populate_existing().all()
-    sender_heads = {u.id for u in candidates if u.role == "head" and u.department_id == task.sender_department_id}
-    recipient_heads = {u.id for u in candidates if u.role == "head" and u.department_id == task.recipient_department_id}
-    ids = {task.author_id} | _stage_heads(task, sender_heads, recipient_heads)
-    if task.status not in ("awaiting_assignment", "sender_acceptance"):
-        ids |= {u.id for u in candidates if u.id == task.assignee_id and u.department_id == task.recipient_department_id}
+    ids = {task.author_id} | {u.id for u in candidates if u.role == "head" and u.department_id == task.recipient_department_id}
+    ids |= {u.id for u in candidates if u.id in roster and u.department_id == task.recipient_department_id}
     return [u for u in candidates if u.id in ids and u.role in ("head", "employee") and can_access_task(u, task)]
 
 
 def event_notification_recipients(task, event):
-    """Current accounts, explicit stage matrix and no blanket department mailing."""
-    from .permissions import is_task_dispatched
+    """Explicit current workflow matrix; a cached delivery never gains new owners."""
+    from .permissions import is_task_dispatched, has_available_assignee
+    if not is_task_dispatched(task):
+        return []
     sender_heads, recipient_heads = _department_heads(task)
     author = {task.author_id}
-    assignee = {task.assignee_id} - {None}
+    assignee = {u.id for u in task.assignees if u.is_active and u.role in ("employee", "head")
+                and u.department_id == task.recipient_department_id}
     kind = event.event_type
-    if kind in ("submitted_for_approval", "approval_withdrawn"):
-        ids = sender_heads
-    elif kind == "approval_returned":
-        ids = author
-    elif kind in ("approved_and_sent", "sent"):
+    if kind == "sent":
         ids = recipient_heads | author
-    elif kind in ("assigned", "reassigned"):
-        previous = event.details.get("before", {}).get("assignee_id")
-        ids = assignee | author | ({previous} if kind == "reassigned" and previous is not None else set())
-    elif kind in ("work_started", "status_changed", "returned_for_revision", "completed"):
-        ids = author | assignee | recipient_heads
-    elif kind == "clarification_requested":
-        ids = author | sender_heads
-    elif kind == "clarification_answered":
+    elif kind in ("assigned", "claimed", "reassigned"):
+        previous = set(event.details.get("before", {}).get("assignee_ids", []))
+        ids = assignee | author | recipient_heads | (previous if kind == "reassigned" else set())
+    elif kind == "released":
+        ids = assignee | author | recipient_heads
+    elif kind == "completed":
+        ids = assignee | author | sender_heads
+    elif kind == "returned_for_revision":
         ids = assignee | recipient_heads
-    elif kind == "result_submitted":
-        ids = recipient_heads | author
-    elif kind == "result_forwarded":
-        ids = sender_heads | author
-    elif kind in ("cancelled", "deadline_changed"):
-        ids = author | sender_heads
-        if is_task_dispatched(task):
-            ids |= assignee | recipient_heads
-    elif kind == "rejected":
-        ids = author | sender_heads | assignee
-    elif kind in ("comment_added", "attachment_added") or kind == "edited" and event.details.get("attachments"):
-        ids = author | assignee | _stage_heads(task, sender_heads, recipient_heads)
+    elif kind in ("cancelled", "deadline_changed", "rejected"):
+        ids = author | assignee | sender_heads | recipient_heads
+    elif kind in ("comment_added", "attachment_added"):
+        ids = author | assignee | recipient_heads
+        if (event.actor_snapshot or {}).get("department_id") == task.recipient_department_id:
+            ids |= sender_heads
     else:
         return []
-    ids = set(ids) - {None, event.actor_id}
-    if kind in ("approved_and_sent", "sent", "rejected"):
+    ids -= {None, event.actor_id}
+    if kind in ("sent", "rejected"):
         ids.add(task.author_id)
-    if not ids:
-        return []
     return [u for u in User.query.filter(User.id.in_(ids)).populate_existing().all()
             if u.role in ("head", "employee") and can_access_task(u, task)]
 
@@ -203,6 +194,15 @@ def deliver_event_notifications(task, event):
     """One key per persisted event/user; no commit or delivery outside this DB."""
     if event.id is None or event.task_id != task.id or not inspect(event).persistent:
         raise ValueError("Уведомление должно относиться к сохранённому событию задачи")
+    from sqlalchemy import select
+    from sqlalchemy.orm import undefer
+    from .models import TaskEvent
+    # A delivery retry must freeze the first recipient set, even in parallel.
+    # Acquire task before event, as workflow already does, never the inverse.
+    task = db.session.execute(select(Task).where(Task.id == task.id).options(undefer("*"))
+        .with_for_update(key_share=True).execution_options(populate_existing=True)).scalar_one()
+    event = db.session.execute(select(TaskEvent).where(TaskEvent.id == event.id, TaskEvent.task_id == task.id)
+        .options(undefer("*")).with_for_update().execution_options(populate_existing=True)).scalar_one()
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     factory = pg_insert if db.session.get_bind().dialect.name == "postgresql" else sqlite_insert

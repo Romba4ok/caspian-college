@@ -5,6 +5,7 @@ from unittest import TestCase, skipUnless
 from unittest.mock import patch
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import create_engine, event, select, text, update
 from app import create_app
 from app.extensions import db
@@ -27,23 +28,20 @@ class ReportTests(PortalCase):
         values=dict(status=status, due_at=self.now-timedelta(hours=1),sent_at=self.now-timedelta(days=3),
             created_at=self.now-timedelta(days=4),revision=1,
             assignee_id=self.ids["other-head"],closed_at=self.now if status in ("completed","cancelled","rejected") else None)
-        if status in ("draft","pending_approval"):values.update(sent_at=None,assignee_id=None)
+        if status=="new":values["assignee_id"]=None
         return self.task(**(values|changes))
 
     def sample(self):
-        # Outgoing: 10 non-completed states + 6 completions = 16.
         for status in TASK_STATUSES:
             if status!="completed":self.add_task(status)
         for hours in (2,6,0):self.add_task("completed",sent_at=self.now-timedelta(hours=hours),completed_at=self.now)
-        self.add_task("completed",sent_at=None,is_legacy_dispatched=True,completed_at=self.now)
         self.add_task("completed",completed_at=None)
         self.add_task("completed",sent_at=self.now,completed_at=self.now-timedelta(hours=1))
+        self.add_task("completed",completed_at=self.now+timedelta(hours=1))
         incoming=dict(author_id=self.ids["other-head"],sender_department_id=self.other_department_id,
             recipient_department_id=self.department_id,assignee_id=self.ids["employee"])
         self.add_task("completed",**incoming,sent_at=self.now-timedelta(hours=10),completed_at=self.now)
-        self.add_task(**incoming)
-        self.add_task("cancelled",**incoming,sent_at=None)
-        self.add_task("draft",**incoming)
+        self.add_task(**incoming);self.add_task("cancelled",**incoming)
         self.add_task(author_id=self.ids["outsider"],sender_department_id=self.third_department_id)
         with self.app.app_context():db.session.get(Department,self.other_department_id).is_archived=True;db.session.commit()
 
@@ -56,25 +54,23 @@ class ReportTests(PortalCase):
     def as_user(self,who):
         self.client=self.app.test_client();self.assertEqual(200,self.login(who).status_code)
 
-    def test_global_total_is_21_not_two_departments_per_task(self):
+    def test_global_total_is_not_doubled_by_two_departments_per_task(self):
         self.sample();report=self.global_report()
-        self.assertEqual(21,report["overall"]["total"])
-        self.assertEqual(21,sum(report["overall"]["statuses"].values()))
-        self.assertEqual(21,sum(d["outgoing"]["total"] for d in report["departments"]))
-        self.assertEqual(17,sum(d["incoming"]["total"] for d in report["departments"]))
-        self.assertEqual(8,report["overall"]["overdue"])
-        self.assertEqual(7,report["overall"]["statuses"]["completed"])
-        self.assertEqual(2,report["overall"]["statuses"]["draft"])
-        self.assertEqual(2,report["overall"]["statuses"]["cancelled"])
+        self.assertEqual(14,report["overall"]["total"])
+        self.assertEqual(14,sum(report["overall"]["statuses"].values()))
+        self.assertEqual(14,sum(d["outgoing"]["total"] for d in report["departments"]))
+        self.assertEqual(14,sum(d["incoming"]["total"] for d in report["departments"]))
+        self.assertEqual(4,report["overall"]["overdue"])
+        self.assertEqual({"new":1,"in_progress":3,"completed":7,"cancelled":2,"rejected":1},report["overall"]["statuses"])
+        self.assertAlmostEqual(4.5,report["overall"]["average_hours"],places=5)
 
-    def test_own_department_directions_exclude_private_incoming_and_unrelated(self):
+    def test_own_department_directions_exclude_unrelated_tasks(self):
         self.sample();report=self.own_report()
-        self.assertEqual(18,report["overall"]["total"])
-        self.assertEqual(16,report["outgoing"]["total"]);self.assertEqual(2,report["incoming"]["total"])
-        self.assertEqual(7,report["overall"]["overdue"])
-        self.assertEqual(6,report["outgoing"]["overdue"]);self.assertEqual(1,report["incoming"]["overdue"])
-        self.assertEqual(0,report["incoming"]["statuses"]["draft"])
-        self.assertEqual(0,report["incoming"]["statuses"]["cancelled"])
+        self.assertEqual(13,report["overall"]["total"])
+        self.assertEqual(10,report["outgoing"]["total"]);self.assertEqual(3,report["incoming"]["total"])
+        self.assertEqual(3,report["overall"]["overdue"])
+        self.assertEqual(2,report["outgoing"]["overdue"]);self.assertEqual(1,report["incoming"]["overdue"])
+        self.assertEqual(1,report["incoming"]["statuses"]["cancelled"])
 
     def test_average_is_calendar_hours_and_bad_dates_are_explicitly_excluded(self):
         self.sample();report=self.own_report()
@@ -84,15 +80,52 @@ class ReportTests(PortalCase):
         self.assertEqual(1,incoming["included"]);self.assertEqual(0,incoming["excluded"])
         self.assertAlmostEqual(10,incoming["average_hours"],places=5)
 
+    def test_two_real_rework_cycles_count_only_latest_current_completion(self):
+        from app.workflow import complete_task,return_task_for_revision
+        ident=self.add_task(sent_at=self.now-timedelta(hours=12),created_at=self.now-timedelta(days=1))
+        def action(method,actor,at):
+            with self.app.app_context(),patch("app.workflow.datetime",wraps=datetime) as clock:
+                clock.now.return_value=at
+                task=db.session.get(Task,ident)
+                method(task=task,actor=db.session.get(User,self.ids[actor]),expected_revision=task.revision,comment="Пояснение результата или доработки")
+                db.session.commit()
+        for cycle,hours in enumerate((4,8,12)):
+            action(complete_task,"other-head",self.now-timedelta(hours=12-hours))
+            metrics=self.own_report()["outgoing"]
+            self.assertEqual((1,0),(metrics["included"],metrics["excluded"]))
+            self.assertAlmostEqual(hours,metrics["average_hours"],places=5)
+            if cycle<2:
+                action(return_task_for_revision,"employee" if cycle==0 else "head",self.now-timedelta(hours=11-hours))
+                data=self.own_report()["outgoing"]
+                self.assertEqual((None,0,0),(data["average_hours"],data["included"],data["statuses"]["completed"]))
+        with self.app.app_context():
+            task=db.session.get(Task,ident)
+            self.assertEqual(2,task.rework_cycle)
+            self.assertEqual(3,TaskEvent.query.filter_by(task_id=ident,event_type="completed").count())
+        self.assertAlmostEqual(12,self.global_report()["overall"]["average_hours"],places=5)
+
+    def test_report_contexts_publish_exactly_five_statuses_and_admin_average(self):
+        from flask import template_rendered
+        self.sample();contexts=[]
+        def capture(sender,template,context,**kwargs):contexts.append(context)
+        for actor,url in (("root","/admin/statistics"),("head","/reports/department")):
+            self.as_user(actor)
+            with template_rendered.connected_to(capture,self.app):response=self.client.get(url)
+            self.assertEqual(200,response.status_code)
+            self.assertEqual(set(TASK_STATUSES),set(contexts[-1]["status_labels"]))
+            page=response.get_data(as_text=True)
+            self.assertIn("4,50 ч",page)
+            self.assertNotIn("окончательной приёмки",page);self.assertNotIn("включая черновики",page)
+
     def test_archive_and_empty_departments_stay_in_global_statistics(self):
         self.sample();report=self.global_report()
         archive=next(d for d in report["departments"] if d["id"]==self.other_department_id)
-        self.assertTrue(archive["archived"]);self.assertEqual(15,archive["incoming"]["total"])
-        self.assertEqual(4,archive["outgoing"]["total"])
+        self.assertTrue(archive["archived"]);self.assertEqual(11,archive["incoming"]["total"])
+        self.assertEqual(3,archive["outgoing"]["total"])
         self.assertEqual(6,len(report["departments"]))
         self.assertTrue(any(d["incoming"]["total"]==d["outgoing"]["total"]==0 for d in report["departments"]))
         own=self.own_report("other-head");self.assertTrue(own["department"]["archived"])
-        self.assertEqual(19,own["overall"]["total"])
+        self.assertEqual(14,own["overall"]["total"])
 
     def test_no_data_is_none_and_not_a_false_zero(self):
         report=self.own_report()
@@ -107,32 +140,31 @@ class ReportTests(PortalCase):
         self.assertEqual(1,data["included"]);self.assertEqual(0,data["excluded"])
         self.assertEqual(0,data["average_hours"]);self.assertEqual("0,00 ч",report_hours(data["average_hours"]))
 
-    def test_only_sender_confirmed_completion_contributes_to_mean(self):
-        for status in ("draft","pending_approval","assigned","in_progress","recipient_review","sender_acceptance","cancelled","rejected"):
+    def test_only_current_completed_status_contributes_to_mean(self):
+        for status in ("new","in_progress","cancelled","rejected"):
             self.add_task(status,completed_at=self.now)
         data=self.own_report()["outgoing"]
         self.assertIsNone(data["average_hours"]);self.assertEqual(0,data["included"]);self.assertEqual(0,data["excluded"])
 
-    def test_unknown_send_completion_and_unproven_dispatch_are_counted_as_exclusions(self):
-        self.add_task("completed",sent_at=None,completed_at=None,is_legacy_dispatched=True)
-        self.add_task("completed",sent_at=None,completed_at=self.now)
+    def test_unknown_reversed_and_future_completion_dates_are_excluded(self):
+        self.add_task("completed",completed_at=None)
+        self.add_task("completed",sent_at=self.now,completed_at=self.now-timedelta(hours=1))
+        self.add_task("completed",completed_at=self.now+timedelta(days=1))
         data=self.own_report()["outgoing"]
-        self.assertEqual(2,data["excluded"]);self.assertIsNone(data["average_hours"])
+        self.assertEqual(3,data["excluded"]);self.assertIsNone(data["average_hours"])
 
-    def test_missing_due_does_not_invent_overdue_or_prevent_valid_elapsed_time(self):
-        self.add_task("completed",due_at=None,legacy_missing_due=True,is_legacy_dispatched=True,
-            sent_at=self.now-timedelta(hours=4),completed_at=self.now)
-        data=self.own_report()["outgoing"]
-        self.assertEqual(0,data["overdue"]);self.assertAlmostEqual(4,data["average_hours"],places=5)
+    def test_mandatory_send_and_deadline_cannot_be_bypassed_by_legacy_flags(self):
+        for changes in ({"due_at":None,"legacy_missing_due":True},{"sent_at":None,"is_legacy_dispatched":True}):
+            with self.assertRaises(IntegrityError):self.add_task("completed",completed_at=self.now,**changes)
+            with self.app.app_context():db.session.rollback()
+        self.assertEqual(0,self.global_report()["overall"]["total"])
 
-    def test_overdue_requires_actual_send_nonterminal_and_strictly_elapsed_deadline(self):
+    def test_overdue_requires_current_active_state_and_strictly_elapsed_deadline(self):
         self.add_task(due_at=self.now)
-        self.add_task(due_at=None,legacy_missing_due=True,is_legacy_dispatched=True)
-        self.add_task(sent_at=None)
-        for status in ("draft","pending_approval","completed","cancelled","rejected"):
-            self.add_task(status,is_legacy_dispatched=True)
+        self.add_task(sent_at=self.now+timedelta(days=1))
+        for status in ("completed","cancelled","rejected"):self.add_task(status)
         self.assertEqual(0,self.global_report()["overall"]["overdue"])
-        self.add_task(due_at=self.now-timedelta(seconds=1))
+        self.add_task("new",due_at=self.now-timedelta(seconds=1))
         self.assertEqual(1,self.global_report()["overall"]["overdue"])
 
     def test_utc_naive_and_local_aware_now_give_same_counts(self):
@@ -247,14 +279,14 @@ class PostgreSQLReportTests(TestCase):
         db.session.commit()
 
     def test_native_interval_aggregation_grouping_and_no_double_count(self):
-        self.task();self.task(sent_at=NOW-timedelta(hours=6));self.task(sent_at=None,is_legacy_dispatched=True)
-        self.task("in_progress");self.task("pending_approval",sent_at=None)
+        self.task();self.task(sent_at=NOW-timedelta(hours=6));self.task(completed_at=None)
+        self.task("in_progress");self.task("new")
         global_data=global_statistics(self.root,now=NOW);own=department_report(self.head,now=NOW)
-        self.assertEqual(5,global_data["overall"]["total"]);self.assertEqual(1,global_data["overall"]["overdue"])
+        self.assertEqual(5,global_data["overall"]["total"]);self.assertEqual(2,global_data["overall"]["overdue"])
         self.assertEqual(2,own["outgoing"]["included"]);self.assertEqual(1,own["outgoing"]["excluded"])
         self.assertAlmostEqual(4,own["outgoing"]["average_hours"],places=8)
         receiver=next(d for d in global_data["departments"] if d["id"]==self.receiver)
-        self.assertEqual(4,receiver["incoming"]["total"])
+        self.assertEqual(5,receiver["incoming"]["total"])
 
     def test_empty_negative_interval_and_zero_are_distinct_on_postgresql(self):
         self.assertIsNone(department_report(self.head,now=NOW)["outgoing"]["average_hours"])
@@ -264,3 +296,22 @@ class PostgreSQLReportTests(TestCase):
         self.task(sent_at=NOW,completed_at=NOW)
         data=department_report(self.head,now=NOW)["outgoing"]
         self.assertEqual(0,data["average_hours"]);self.assertEqual(1,data["included"])
+
+    def test_native_mean_uses_latest_completion_after_two_rework_cycles(self):
+        from app.workflow import complete_task,return_task_for_revision
+        worker=User(username="worker",full_name="Исполнитель",role="employee",department_id=self.receiver,password_hash="synthetic")
+        db.session.add(worker);db.session.commit()
+        self.task("in_progress",assignee_id=worker.id,sent_at=NOW-timedelta(hours=10))
+        task=Task.query.one()
+        for cycle,hours in enumerate((4,8,10)):
+            with patch("app.workflow.datetime",wraps=datetime) as clock:
+                clock.now.return_value=NOW-timedelta(hours=10-hours)
+                complete_task(task=task,actor=worker,expected_revision=task.revision,comment="Результат")
+                db.session.commit()
+            metrics=global_statistics(self.root,now=NOW)["overall"]
+            self.assertEqual(1,metrics["included"]);self.assertAlmostEqual(hours,metrics["average_hours"],places=8)
+            if cycle<2:
+                return_task_for_revision(task=task,actor=self.head,expected_revision=task.revision,comment="Доработать")
+                db.session.commit()
+                self.assertIsNone(department_report(self.head,now=NOW)["overall"]["average_hours"])
+        self.assertEqual(2,task.rework_cycle)

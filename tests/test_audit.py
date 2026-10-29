@@ -1,4 +1,5 @@
 """Unified, immutable administrator journal on synthetic SQLite/PostgreSQL data."""
+import json
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from html import unescape
@@ -121,6 +122,63 @@ class AuditTests(PortalCase):
         self.assertNotIn("postgresql://",body);self.assertIn("Пароль изменён",body);self.assertIn("Безопасное имя",body)
         self.assertIn("[скрыто]",body)
 
+    def test_session_cookie_auth_stamp_and_authorization_are_hidden_without_rewriting_history(self):
+        comment="Пояснение до реквизитов\nCookie: session=cookie-secret; custom_auth=another-secret\nAuthorization: Bearer bearer-secret\n_auth_stamp=stamp-secret apiKey=api-secret session=plain-session-secret\nОбычное пояснение после реквизитов"
+        ident=self.entry(details={"comment":comment})
+        self.login();page=self.client.get("/admin/audit").get_data(as_text=True)
+        for value in ("cookie-secret","another-secret","bearer-secret","stamp-secret","api-secret","plain-session-secret"):
+            self.assertNotIn(value,page)
+        self.assertIn("Обычное пояснение после реквизитов",page)
+        with self.app.app_context():self.assertEqual(comment,db.session.get(TaskEvent,ident).details["comment"])
+
+    def test_new_admin_metadata_never_persists_credential_keys(self):
+        from app.audit import record_admin_event
+        with self.app.app_context():
+            row=record_admin_event("account_updated","user",self.ids["employee"],actor=db.session.get(User,self.ids["root"]),
+                before={"nested":{"session":"session-secret","_auth_stamp":"stamp-secret","apiKey":"api-secret","Cookie":"cookie-secret"}},
+                after={"password_changed":True,"full_name":"Допустимое имя","authorization":"authorization-secret"})
+            db.session.commit()
+            stored=json.dumps(row.details,ensure_ascii=False)
+            for secret in ("session-secret","stamp-secret","api-secret","cookie-secret","authorization-secret"):
+                self.assertNotIn(secret,stored)
+            self.assertTrue(row.details["after"]["password_changed"])
+            self.assertEqual("Допустимое имя",row.details["after"]["full_name"])
+
+    def test_head_staff_operations_are_audited_with_saved_actor_and_system_explanation(self):
+        from app.accounts import create_account,update_account,set_account_blocked
+        with self.app.app_context():
+            head=db.session.get(User,self.ids["head"])
+            original_name=head.full_name;original_department=head.department.name
+            user=create_account(actor=head,full_name="Сотрудник",username="staff-audit",password="staff-secret")
+            db.session.commit();ident=user.id
+            update_account(actor=head,user_id=ident,full_name="Новое имя сотрудника",username="staff-audit",password="")
+            db.session.commit()
+            set_account_blocked(actor=head,user_id=ident,blocked=True);db.session.commit()
+            head.full_name="Новое имя начальника";head.department.name="Новое имя отдела";db.session.commit()
+        rows=self.journal(user_id=self.ids["head"])["entries"]
+        self.assertEqual(3,len(rows))
+        self.assertEqual({"Учётная запись создана","Учётная запись изменена","Учётная запись отключена"},{row["action"] for row in rows})
+        for row in rows:
+            self.assertEqual((original_name,"Начальник отдела",original_department),(row["actor_name"],row["actor_role"],row["actor_department"]))
+            self.assertIn("Системное пояснение",row["comment"])
+            self.assertEqual(ident,row["object_id"])
+        self.login();page=self.client.get("/admin/audit",query_string={"user_id":self.ids["head"]}).get_data(as_text=True)
+        self.assertNotIn("staff-secret",page)
+
+    def test_current_claim_release_and_rework_fields_have_explicit_labels(self):
+        self.entry(event_type="claimed",details={"comment":"Взял", "before":{"status":"new","assignee_ids":None},"after":{"status":"in_progress","assignee_ids":self.ids["employee"]}})
+        self.entry(event_type="released",details={"comment":"Снял", "before":{"status":"in_progress"},"after":{"status":"new"}})
+        self.entry(event_type="returned_for_revision",details={"comment":"Замечания", "before":{"rework_cycle":1,"is_rework":False},"after":{"rework_cycle":2,"is_rework":True}})
+        rows=self.journal()["entries"]
+        self.assertEqual({"Сотрудник взял задачу","Исполнитель снял задачу с себя","Задача возвращена на доработку"},{row["action"] for row in rows})
+        rework=next(row for row in rows if row["action"]=="Задача возвращена на доработку")
+        self.assertIn(("Цикл доработки","1","2"),rework["changes"])
+        self.assertIn(("На доработке","Нет","Да"),rework["changes"])
+
+    def test_earlier_workflow_status_values_remain_readable_without_becoming_current_statuses(self):
+        self.entry(event_type="status_changed",details={"comment":"Историческая запись", "before":{"status":"accepted"},"after":{"status":"ready"}})
+        self.assertIn(("Статус","Принята (прежний процесс)","Готова (прежний процесс)"),self.journal()["entries"][0]["changes"])
+
     def test_hash_and_bearer_redaction_does_not_destroy_regular_comment(self):
         for value in ("scrypt:32768:8:1$secret$hash", "pbkdf2:sha256:1000$secret$hash", "Bearer abc.def.ghi", "https://name:password@example.test/path"):
             cleaned=audit_text("Документ принят; "+value)
@@ -217,18 +275,22 @@ class AuditTests(PortalCase):
         post(f"/admin/users/{ident}/edit",self.form("audit-user",full_name="Другое имя",password="new-synthetic-password"),"account_updated")
         post(f"/admin/users/{ident}/block",{},"account_blocked")
         post(f"/admin/users/{ident}/unblock",{},"account_unblocked")
-        post(f"/admin/users/{ident}/delete",{},"account_deleted")
+        post(f"/admin/users/{ident}/delete",{},"account_blocked")
         post("/admin/departments/new",{"name":"Аудит отдела"},"department_created")
         with self.app.app_context(): ident=Department.query.filter_by(name="Аудит отдела").one().id
         post(f"/admin/departments/{ident}/edit",{"name":"Аудит переименован"},"department_renamed")
         post(f"/admin/departments/{ident}/archive",{},"department_archived")
         post(f"/admin/departments/{ident}/restore",{},"department_restored")
         post(f"/admin/departments/{ident}/delete",{},"department_deleted")
-        post("/admin/categories/new",{"name":"Аудит категории"},"category_created")
-        with self.app.app_context(): ident=TaskCategory.query.filter_by(name="Аудит категории").one().id
-        post(f"/admin/categories/{ident}/edit",{"name":"Другая категория"},"category_renamed")
-        post(f"/admin/categories/{ident}/archive",{},"category_archived")
-        post("/admin/settings",{"max_upload_mb":"10","allowed_extensions":["pdf","png"]},"upload_policy_updated")
+        # T012 retires management routes; their historical events stay readable.
+        with self.app.app_context():
+            from app.settings import create_category,rename_category,archive_category,update_upload_policy
+            admin=db.session.get(User,self.ids["root"])
+            category=create_category(actor=admin,name="Аудит категории")
+            rename_category(actor=admin,category_id=category.id,name="Другая категория")
+            archive_category(actor=admin,category_id=category.id)
+            update_upload_policy(actor=admin,max_upload_mb="10",allowed_extensions=["pdf","png"])
+            db.session.commit()
         self.assertEqual(14,self.journal()["total"])
 
     def test_record_is_rolled_back_with_the_administrative_change(self):
@@ -264,7 +326,7 @@ class PostgreSQLAuditTests(TestCase):
         self.ctx=self.app.app_context();self.ctx.push();self.root=User.query.filter_by(role="admin").one()
         departments=Department.query.order_by(Department.id).all()
         task=Task(title="Аудит PostgreSQL",description="Проверка",author_id=self.root.id,sender_department_id=departments[0].id,
-                  recipient_department_id=departments[1].id,status="draft",due_at=NOW)
+                  recipient_department_id=departments[1].id,status="new",due_at=NOW,sent_at=NOW)
         db.session.add(task);db.session.flush();self.task_id=task.id;db.session.commit()
 
     def tearDown(self):

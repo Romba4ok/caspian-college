@@ -46,6 +46,7 @@ def create_app(test_config=None):
 
     from .admin import admin_bp
     from .auth import auth_bp
+    from .staff import staff_bp
     from .tasks import tasks_bp
     from .reporting import reports_bp
     from .notifications import init_app as init_notifications
@@ -55,6 +56,7 @@ def create_app(test_config=None):
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(staff_bp)
     app.register_blueprint(tasks_bp)
     app.register_blueprint(reports_bp)
     init_notifications(app)
@@ -65,9 +67,12 @@ def create_app(test_config=None):
     @login_manager.user_loader
     def load_user(user_id):
         try:
+            if not isinstance(user_id,str) or not user_id.isascii() or not user_id.isdecimal() or len(user_id)>10 or not 0<int(user_id)<=2**31-1:
+                return None
             user = db.session.get(User, int(user_id), populate_existing=True)
             if user and user.is_active and user.role in ROLES and (user.role == "admin" or user.department_id is not None):
-                return user
+                from .accounts import session_is_current
+                return user if session_is_current(user,session.get("_auth_stamp")) else None
             return None
         except (TypeError, ValueError):
             return None
@@ -76,6 +81,7 @@ def create_app(test_config=None):
     def load_current_user_context():
         if not current_user.is_authenticated and "_user_id" in session:
             logout_user()
+            session.pop("_auth_stamp",None)
         g.user = current_user if current_user.is_authenticated else None
 
     @app.context_processor
@@ -100,10 +106,11 @@ def create_app(test_config=None):
     @app.errorhandler(409)
     @app.errorhandler(413)
     @app.errorhandler(405)
+    @app.errorhandler(410)
     def localized_request_error(error):
         defaults = {
             400: "Не удалось проверить форму. Обновите страницу и повторите действие.",
-            405: "Действие недоступно", 413: "Превышен допустимый размер запроса",
+            405: "Действие недоступно", 410: "Этот раздел больше не используется", 413: "Превышен допустимый размер запроса",
         }
         description = error.description
         if error.code in defaults and (not description or not any("А" <= c <= "я" for c in description)):

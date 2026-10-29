@@ -1,259 +1,124 @@
-"""Board completeness, private aggregates and bounded SQL for large boards."""
-from datetime import datetime, timedelta, timezone
-from html import unescape
-import json
-import re
-from uuid import uuid4
-
-from flask import template_rendered
-from sqlalchemy import event, inspect
-
+"""Complete, scoped board data without per-card SQL."""
+import os
+from unittest import TestCase,skipUnless
+from sqlalchemy import event
 from app.extensions import db
-from app.models import Department, Task, TaskAttachment, TaskComment, TaskEvent, TaskNotification, User
-from support.portal_fixtures import PortalCase
+from app.models import Department,Task,TaskComment,TaskAttachment,User
+from support.task_view_fixtures import ViewCase
 
 
-ACTIVE = ("draft", "pending_approval", "awaiting_assignment", "assigned", "in_progress",
-          "awaiting_clarification", "recipient_review", "sender_acceptance")
+class BoardProjectionTests(ViewCase):
+    def test_every_active_status_is_grouped_once_for_both_departments(self):
+        ids=self.many(36)
+        for direction,actor in (("sent","employee"),("received","worker")):
+            response,ctx=self.render(direction,actor)
+            self.assertEqual(["new","in_progress"],[g["key"] for g in ctx["board_groups"]])
+            self.assertEqual(["Новые","В работе"],[g["label"] for g in ctx["board_groups"]])
+            self.assertEqual([18,18],[g["count"] for g in ctx["board_groups"]])
+            self.assertEqual(set(ids),set(self.cards(response)))
+            self.assertEqual(36,sum(len(g["tasks"]) for g in ctx["board_groups"]))
 
+    def test_300_cards_are_complete_while_list_keeps_25(self):
+        ids=self.many(300)
+        for direction,actor in (("sent","employee"),("received","receiver-head")):
+            for page in (1,9):
+                response,ctx=self.render(direction,actor,page=page)
+                self.assertEqual(set(ids),set(self.cards(response)));self.assertEqual(300,ctx["pagination"].total)
+            _,ctx=self.render(direction,actor,view="list",page=2)
+            self.assertEqual(25,len(ctx["tasks"]));self.assertEqual(12,ctx["pagination"].pages)
 
-class BoardProjectionTests(PortalCase):
-    def setUp(self):
-        super().setUp()
-        self.add_member("worker", department_id=self.other_department_id)
-        self.add_member("receiver-head", role="head", department_id=self.other_department_id)
-        self.add_member("blocked-worker", department_id=self.other_department_id, blocked=True)
+    def test_empty_active_boards_have_two_groups_and_no_candidates(self):
+        response,ctx=self.render()
+        self.assertEqual([0,0],[g["count"] for g in ctx["board_groups"]]);self.assertEqual({},self.cards(response))
 
-    def as_user(self, username="employee"):
-        self.client = self.app.test_client()
-        self.assertEqual(200, self.login(username).status_code)
-
-    def board(self, direction="sent", query="view=board"):
-        contexts = []
-        def capture(sender, template, context, **extra):
-            contexts.append(context)
-        with template_rendered.connected_to(capture, self.app):
-            response = self.client.get(f"/tasks/{direction}?{query}")
-        self.assertEqual(200, response.status_code)
-        return response, contexts[-1]
-
-    def cards(self, response):
-        return {card["id"]: card for card in (
-            json.loads(unescape(raw)) for raw in re.findall(
-                r'data-board-task="([^"]+)"', response.get_data(as_text=True)))}
-
-    def assert_groups(self, context, expected, ids):
-        groups = context["board_groups"]
-        self.assertEqual(list(expected), [group["label"] for group in groups])
-        self.assertEqual(list(expected.values()), [group["statuses"] for group in groups])
-        grouped = [task.id for group in groups for task in group["tasks"]]
-        self.assertEqual(set(ids), set(grouped))
-        self.assertEqual(len(ids), len(grouped))
-        self.assertEqual(len(ids), sum(group["count"] for group in groups))
-        self.assertEqual(len(ids), context["counts"][context["direction"]])
-        for group in groups:
-            self.assertEqual(group["count"], len(group["tasks"]))
-            self.assertTrue(all(task.status in group["statuses"] for task in group["tasks"]))
-
-    def test_sent_groups_cover_every_active_status_exactly_once(self):
-        ids = self.task_batch(36, statuses=ACTIVE)
-        self.as_user()
-        response, context = self.board()
-        self.assertEqual(set(ids), set(self.cards(response)))
-        self.assert_groups(context, {
-            "Черновики": ("draft",), "На согласовании": ("pending_approval",),
-            "Поручения отправлены": ("awaiting_assignment", "assigned"),
-            "Отдел выполняет": ("in_progress", "awaiting_clarification"),
-            "Проверка и приёмка результата": ("recipient_review", "sender_acceptance"),
-        }, ids)
-        self.assertEqual(set(ACTIVE), {task.status for task in context["tasks"]})
-
-    def test_received_groups_exclude_presend_and_closed_tasks(self):
-        hidden = self.task_batch(4, statuses=("draft", "pending_approval"))
-        closed = self.task_batch(3, statuses=("completed", "cancelled", "rejected"))
-        ids = self.task_batch(36, statuses=ACTIVE[2:])
-        self.as_user("receiver-head")
-        response, context = self.board("received")
-        self.assertEqual(set(ids), set(self.cards(response)))
-        self.assertTrue(set(hidden + closed).isdisjoint(self.cards(response)))
-        self.assert_groups(context, {
-            "К выполнению": ("awaiting_assignment", "assigned"),
-            "В работе": ("in_progress",), "Уточнение": ("awaiting_clarification",),
-            "Результат: проверка у начальника отдела": ("recipient_review",),
-            "Результат: приёмка заказчиком": ("sender_acceptance",),
-        }, ids)
-
-    def test_300_tasks_in_both_directions_ignore_page_but_lists_keep_25(self):
-        ids = self.task_batch(300, statuses=("awaiting_assignment",))
-        for username, direction in (("employee", "sent"), ("receiver-head", "received")):
-            self.as_user(username)
-            for page in ("1", "2", "999", "invalid"):
-                response, context = self.board(direction, f"view=board&page={page}")
-                self.assertEqual(set(ids), set(self.cards(response)))
-                self.assertEqual(300, context["pagination"].total)
-                self.assertFalse(context["pagination"].has_next)
-                self.assertNotIn('aria-label="Страницы задач"', response.get_data(as_text=True))
-            pages = []
-            for page in (1, 2):
-                response, context = self.board(direction, f"view=list&page={page}")
-                self.assertEqual(25, len(context["tasks"]))
-                self.assertEqual(300, context["pagination"].total)
-                self.assertEqual(12, context["pagination"].pages)
-                self.assertEqual([], context["board_groups"])
-                pages.append({task.id for task in context["tasks"]})
-            self.assertTrue(pages[0].isdisjoint(pages[1]))
-
-    def test_empty_board_has_five_zero_groups_and_no_candidates(self):
-        self.as_user()
-        for direction in ("received", "sent"):
-            response, context = self.board(direction)
-            self.assertEqual({}, self.cards(response))
-            self.assertEqual(5, len(context["board_groups"]))
-            self.assertTrue(all(group["count"] == 0 for group in context["board_groups"]))
-            self.assertEqual(0, context["pagination"].total)
-
-    def test_counts_are_independent_and_include_legacy_and_comment_files(self):
-        ids = self.task_batch(2, statuses=("awaiting_assignment",))
-        hidden = self.task()
+    def test_counts_do_not_multiply_comments_and_files(self):
+        ident=self.card()
         with self.app.app_context():
-            comments = [TaskComment(task_id=ids[0], author_id=self.ids["employee"], body="Пример") for _ in range(2)]
-            private = TaskComment(task_id=hidden, author_id=self.ids["employee"], body="Приватный комментарий")
-            db.session.add_all(comments + [private]); db.session.flush()
-            for task_id, comment_id in [(ids[0], None), (ids[0], comments[0].id),
-                                         (ids[0], comments[1].id), (hidden, private.id)]:
-                db.session.add(TaskAttachment(task_id=task_id, uploaded_by_id=self.ids["employee"],
-                    original_filename="Пример.pdf", storage_key=uuid4().hex, content_type="application/pdf",
-                    size_bytes=20, comment_id=comment_id))
+            comments=[TaskComment(task_id=ident,author_id=self.ids["employee"],body=str(i)) for i in range(3)]
+            db.session.add_all(comments);db.session.flush()
+            for i in range(4):db.session.add(TaskAttachment(task_id=ident,uploaded_by_id=self.ids["employee"],
+                comment_id=None if i==0 else comments[0].id,original_filename=f"file{i}.pdf",storage_key=str(i)*32,content_type="application/pdf",size_bytes=10))
             db.session.commit()
-        self.as_user("receiver-head")
-        response, context = self.board("received")
-        cards = self.cards(response)
-        self.assertEqual(2, cards[ids[0]]["comment_count"])
-        self.assertEqual(3, cards[ids[0]]["attachment_count"])
-        self.assertEqual(0, cards[ids[1]]["comment_count"])
-        self.assertEqual(0, cards[ids[1]]["attachment_count"])
-        self.assertNotIn(hidden, cards)
-        for task in context["tasks"]:
-            self.assertTrue({"comments", "attachments", "events"} <= inspect(task).unloaded)
+        response,_=self.render();data=self.cards(response)[ident]
+        self.assertEqual((3,4),(data["comment_count"],data["attachment_count"]))
 
-    def test_candidates_only_on_permitted_cards_and_only_active_local_members(self):
-        ids = self.task_batch(2, statuses=("awaiting_assignment", "sender_acceptance"), assignee_id=None)
-        self.as_user("receiver-head")
-        response, _ = self.board("received")
-        cards = self.cards(response)
-        self.assertEqual({self.ids["worker"], self.ids["receiver-head"]}, {u["id"] for u in cards[ids[0]]["candidates"]})
-        self.assertEqual([], cards[ids[1]]["candidates"])
-        self.as_user("worker")
-        self.assertTrue(all(not card["candidates"] for card in self.cards(self.board("received")[0]).values()))
-        self.as_user("root")
-        self.assertTrue(all(not card["actions"] and not card["candidates"] for card in self.cards(self.board("received")[0]).values()))
+    def test_candidates_are_only_active_recipient_members_and_only_on_authorized_cards(self):
+        new=self.card();work=self.card("in_progress")
+        response,_=self.render("received","receiver-head");cards=self.cards(response)
+        self.assertEqual({self.ids[x] for x in ("worker","peer","receiver-head","receiver-head2")},{u["id"] for u in cards[new]["candidates"]})
+        self.assertIn(self.ids["worker"],{u["id"] for u in cards[work]["candidates"]})
+        response,_=self.render("received","peer")
+        self.assertTrue(all(not c["candidates"] for c in self.cards(response).values()))
 
-    def test_department_boundary_applies_to_cards_groups_and_totals(self):
-        own = self.task_batch(36, statuses=ACTIVE)
-        foreign = self.task_batch(36, statuses=ACTIVE, author_id=self.ids["outsider"],
-            sender_department_id=self.third_department_id, recipient_department_id=self.other_department_id)
-        self.as_user()
-        response, context = self.board()
-        self.assertEqual(set(own), set(self.cards(response)))
-        self.assertEqual(36, sum(group["count"] for group in context["board_groups"]))
-        self.as_user("outsider")
-        response, context = self.board()
-        self.assertEqual(set(foreign), set(self.cards(response)))
-        self.assertEqual(36, sum(group["count"] for group in context["board_groups"]))
-        self.assertTrue(set(own).isdisjoint(self.cards(response)))
+    def test_foreign_cards_counts_and_candidates_never_leak(self):
+        ident=self.card();foreign=self.foreign()
+        for direction,actor in (("sent","employee"),("received","worker")):
+            response,ctx=self.render(direction,actor)
+            self.assertEqual({ident},set(self.cards(response)));self.assertNotIn(b"FOREIGN-PRIVATE-CARD",response.data)
+            self.assertEqual(1,ctx["counts"][direction]);self.assertNotIn(foreign,ctx["board_data"])
+        response,_=self.render(actor="root");self.assertEqual({ident,foreign},set(self.cards(response)))
+        self.assertTrue(all(not c["actions"] and not c["candidates"] for c in self.cards(response).values()))
 
-    def test_admin_sees_all_active_tasks_but_received_still_excludes_presend(self):
-        own = self.task_batch(36, statuses=ACTIVE)
-        other = self.task_batch(8, statuses=ACTIVE, author_id=self.ids["outsider"],
-            sender_department_id=self.third_department_id, recipient_department_id=self.other_department_id)
-        self.task_batch(3, statuses=("completed", "cancelled", "rejected"))
-        self.as_user("root")
-        response, context = self.board()
-        self.assertEqual(set(own + other), set(self.cards(response)))
-        self.assertEqual(44, sum(group["count"] for group in context["board_groups"]))
-        response, context = self.board("received")
-        self.assertTrue(all(task.status not in ACTIVE[:2] for task in context["tasks"]))
-        self.assertEqual(len(self.cards(response)), sum(group["count"] for group in context["board_groups"]))
+    def test_sql_count_stays_bounded_from_36_to_300_for_board_and_list(self):
+        self.many(36)
+        with self.app.app_context():engine=db.engine
+        def measured(view):
+            queries=[]
+            def capture(*args):queries.append(args[2])
+            event.listen(engine,"before_cursor_execute",capture)
+            try:response,_=self.render("received","receiver-head",view=view)
+            finally:event.remove(engine,"before_cursor_execute",capture)
+            self.assertEqual(200,response.status_code);return len(queries)
+        small={v:measured(v) for v in ("board","list")};self.many(264)
+        for view in ("board","list"):
+            large=measured(view);self.assertLessEqual(large,small[view]+2);self.assertLessEqual(large,20)
 
-    def test_missing_sent_marker_does_not_make_task_visible_to_recipient(self):
-        hidden = self.task_batch(2, statuses=("assigned",), sent_at=None)
-        self.as_user("receiver-head")
-        response, context = self.board("received")
-        self.assertEqual({}, self.cards(response))
-        self.assertEqual(0, sum(group["count"] for group in context["board_groups"]))
-        self.assertEqual(404, self.client.get(f"/tasks/{hidden[0]}").status_code)
+    def test_reading_projection_and_list_does_not_write_workflow(self):
+        self.many(36);before=self.snapshot()
+        self.render();self.render("received","receiver-head");self.render(view="list")
+        self.assertEqual(before,self.snapshot())
 
-    def test_archived_department_keeps_old_board_but_no_new_send_action(self):
-        ids = self.task_batch(2, statuses=("draft", "awaiting_assignment"), author_id=self.ids["head"])
+
+from support.migration_fixtures import MigrationDatabase
+from support.task_view_fixtures import NOW
+
+
+@skipUnless(os.environ.get("PORTAL_TEST_DATABASE_URL"),"Требуется безопасный runner PostgreSQL")
+class PostgreSQLBoardProjectionTests(MigrationDatabase,TestCase):
+    postgres=True
+    client_for=ViewCase.client_for
+    cards=ViewCase.cards
+
+    def render(self,*args,**kwargs):
+        # The migration fixture holds an app context; each browser request must
+        # get its own g/current_user cache, just as a real request does.
         with self.app.app_context():
-            db.session.get(Department, self.department_id).is_archived = True; db.session.commit()
-        self.as_user("head")
-        response, context = self.board()
-        self.assertEqual(set(ids), set(self.cards(response)))
-        self.assertEqual({"cancel"}, {a["key"] for a in self.cards(response)[ids[0]]["actions"]})
-        self.assertFalse(context["may_create"])
+            return ViewCase.render(self,*args,**kwargs)
 
-    def test_anonymous_and_blocked_account_cannot_read_projection(self):
-        self.task_batch(36, statuses=("awaiting_assignment",))
-        response = self.client.get("/tasks/received?view=board")
-        self.assertEqual(302, response.status_code)
-        self.as_user("blocked-worker")
-        response = self.client.get("/tasks/received?view=board")
-        self.assertEqual(302, response.status_code)
-        self.assertNotIn("Поручение", response.get_data(as_text=True))
-
-    def test_completed_explicit_list_and_invalid_views_keep_pagination(self):
-        self.task_batch(36, statuses=("completed",))
-        self.as_user()
-        response, context = self.board("completed", "view=list&scope=sent")
-        self.assertEqual("list", context["view"])
-        self.assertEqual(25, len(context["tasks"]))
-        self.assertEqual([], context["board_groups"])
-        self.task_batch(36, statuses=("draft",))
-        response, context = self.board(query="view=invalid")
-        self.assertEqual("list", context["view"])
-        self.assertEqual(25, len(context["tasks"]))
-
-    def test_board_preserves_list_deadline_then_creation_then_id_order(self):
-        base = datetime(2030, 1, 1, tzinfo=timezone.utc)
-        ids = [self.task(title=f"Порядок {index}", due_at=base + timedelta(days=day),
-                         created_at=base + timedelta(hours=hour))
-               for index, (day, hour) in enumerate([(2, 1), (1, 3), (1, 1), (1, 1)])]
-        self.as_user()
-        _, context = self.board()
-        ordered = [task.id for task in context["tasks"]]
-        self.assertEqual([ids[1], ids[3], ids[2], ids[0]], ordered)
-        _, listing = self.board(query="view=list")
-        self.assertEqual(ordered, [task.id for task in listing["tasks"]])
-
-    def test_reading_board_does_not_mutate_workflow_or_notifications(self):
-        ids = self.task_batch(36, statuses=ACTIVE)
-        self.as_user("head")
-        self.board(); self.board(query="view=board&page=2")
-        with self.app.app_context():
-            tasks = Task.query.order_by(Task.id).all()
-            self.assertEqual(ids, [task.id for task in tasks])
-            self.assertEqual([ACTIVE[i % len(ACTIVE)] for i in range(36)], [task.status for task in tasks])
-            self.assertTrue(all(task.revision == 0 for task in tasks))
-            for model in (TaskEvent, TaskComment, TaskNotification): self.assertEqual(0, model.query.count())
-
-    def test_sql_queries_stay_bounded_from_36_to_300_cards(self):
-        self.task_batch(36, statuses=("assigned",), assignee_id=self.ids["worker"])
-        self.as_user("receiver-head")
-        with self.app.app_context(): engine = db.engine
-        def measure():
-            statements = []
-            def capture(conn, cursor, statement, parameters, context, executemany):
-                statements.append(statement)
-            event.listen(engine, "before_cursor_execute", capture)
-            try: response, context = self.board("received")
-            finally: event.remove(engine, "before_cursor_execute", capture)
-            self.assertTrue(all(s.lstrip().upper().startswith("SELECT") for s in statements))
-            return len(statements), len(self.cards(response))
-        small_queries, small_cards = measure()
-        self.task_batch(264, statuses=("assigned",), assignee_id=self.ids["worker"])
-        large_queries, large_cards = measure()
-        self.assertEqual((36, 300), (small_cards, large_cards))
-        self.assertLessEqual(large_queries, small_queries + 1)
-        self.assertLess(large_queries, 20)
-        print(f"Board SQL: {small_cards} cards / {small_queries} SELECT; {large_cards} cards / {large_queries} SELECT")
+    def test_native_36_and_300_cards_with_scoped_aggregates_bounded_queries_and_list(self):
+        self.upgrade();departments=Department.query.order_by(Department.id).all();source,recipient=departments[:2]
+        users=[User(username=name,full_name=name,password_hash="synthetic",role=role,department_id=did)
+            for name,role,did in (("employee","employee",source.id),("worker","employee",recipient.id),("receiver-head","head",recipient.id))]
+        db.session.add_all(users);db.session.flush();self.ids={u.username:u.id for u in users};source_id,recipient_id=source.id,recipient.id;db.session.commit()
+        ids=[]
+        def add(count):
+            rows=[Task(title=f"Native {len(ids)+i}",description="Синтетический пример",author_id=self.ids["employee"],sender_department_id=source_id,
+                recipient_department_id=recipient_id,status="new" if i%2==0 else "in_progress",assignee_id=None if i%2==0 else self.ids["worker"],due_at=NOW,sent_at=NOW,created_at=NOW) for i in range(count)]
+            db.session.add_all(rows);db.session.flush();ids.extend(t.id for t in rows);db.session.commit();db.session.remove()
+        engine=db.engine
+        def read(view):
+            queries=[]
+            def capture(*args):queries.append(args[2])
+            event.listen(engine,"before_cursor_execute",capture)
+            try:response,ctx=self.render("received","receiver-head",view=view)
+            finally:event.remove(engine,"before_cursor_execute",capture)
+            self.assertEqual(len(ids),ctx["pagination"].total)
+            self.assertEqual(25 if view=="list" else len(ids),len(ctx["tasks"]))
+            if view=="board":self.assertEqual(set(ids),set(self.cards(response)));self.assertEqual(len(ids),sum(g["count"] for g in ctx["board_groups"]))
+            return len(queries)
+        add(36);small={v:read(v) for v in ("board","list")};add(264)
+        task_id=ids[0];comment=TaskComment(task_id=task_id,author_id=self.ids["employee"],body="Обсуждение");db.session.add(comment);db.session.flush()
+        db.session.add(TaskAttachment(task_id=task_id,comment_id=comment.id,uploaded_by_id=self.ids["employee"],original_filename="example.pdf",storage_key="synthetic-projection.pdf",content_type="application/pdf",size_bytes=20));db.session.commit();db.session.remove()
+        for view in ("board","list"):
+            large=read(view);self.assertLessEqual(large,small[view]+2);self.assertLessEqual(large,20)
+        response,_=self.render("received","receiver-head");card=self.cards(response)[task_id];self.assertEqual((1,1),(card["comment_count"],card["attachment_count"]))

@@ -1,247 +1,121 @@
-"""Directory history, upload policy validation and administrative boundaries."""
-from datetime import datetime, timezone
+"""Retired management URLs preserve directory data, history and fixed upload policy."""
 from pathlib import Path
-import json
-import sys
-import tempfile
-from unittest.mock import patch
-
+from tempfile import TemporaryDirectory
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.extensions import db
-from app.models import AdminAuditEvent, SystemSettings, Task, TaskAttachment, TaskCategory, TaskEvent, User
-from app.settings import (SettingsError, SUPPORTED_EXTENSIONS, active_categories, create_category,
-                          get_upload_policy, update_upload_policy, validate_upload_policy)
+from app.models import AdminAuditEvent,SystemSettings,Task,TaskAttachment,TaskCategory,User
+from app.settings import (SettingsError,SUPPORTED_EXTENSIONS,active_categories,create_category,rename_category,archive_category,
+    get_upload_policy,update_upload_policy,validate_upload_policy)
 from support.portal_fixtures import PortalCase
 
 
 class SystemSettingsTests(PortalCase):
-    def setUp(self):
-        super().setUp()
-        self.login()
+    def setUp(self):super().setUp();self.login()
 
-    def category(self, name="Оборудование"):
-        self.assertEqual(302, self.client.post("/admin/categories/new", data={"name": name}).status_code)
+    def category(self,name="Оборудование"):
         with self.app.app_context():
-            return TaskCategory.query.filter_by(normalized_name=name.strip().casefold()).one().id
+            row=create_category(actor=db.session.get(User,self.ids["root"]),name=name);db.session.commit();return row.id
 
-    def category_data(self, category_id):
+    def snapshot(self):
         with self.app.app_context():
-            row = db.session.get(TaskCategory, category_id)
-            return dict(name=row.name, normalized_name=row.normalized_name, is_archived=row.is_archived)
+            return {m.__tablename__:db.session.execute(select(m.__table__).order_by(m.id)).all() for m in (TaskCategory,SystemSettings,AdminAuditEvent,Task,TaskAttachment)}
 
-    def policy(self):
+    def retired(self,ident=9999):
+        return (("GET","/admin/categories"),("POST","/admin/categories/new"),("POST",f"/admin/categories/{ident}/edit"),
+            ("POST",f"/admin/categories/{ident}/archive"),("GET","/admin/settings"),("POST","/admin/settings"))
+
+    def test_retired_admin_get_and_post_are_410_without_changes(self):
+        ident=self.category();self.task(category_id=ident,category="Оборудование");before=self.snapshot()
+        for method,path in self.retired(ident):
+            response=self.client.open(path,method=method,data=dict(name="Подмена",max_upload_mb="1",allowed_extensions="pdf"))
+            self.assertEqual(410,response.status_code);self.assertIn("больше не используется",response.get_data(as_text=True));self.assertEqual(before,self.snapshot())
+
+    def test_role_and_anonymous_checks_remain_before_retirement(self):
+        for actor in ("head","employee","outsider",None):
+            client=self.app.test_client()
+            if actor:self.login(actor,client=client)
+            for method,path in self.retired():
+                response=client.open(path,method=method,data={"name":"Обход"})
+                self.assertEqual(403 if actor else 302,response.status_code)
+        self.assertEqual([],self.snapshot()["task_categories"])
+
+    def test_retired_posts_keep_csrf_and_do_not_enable_other_verbs(self):
+        self.app.config["WTF_CSRF_ENABLED"]=True
+        for method,path in self.retired():
+            if method=="POST":self.assertEqual(400,self.client.post(path).status_code)
+            self.assertEqual(405,self.client.put(path).status_code)
+
+    def test_default_policy_has_fixed_limit_without_creating_settings(self):
+        before=self.snapshot()
         with self.app.app_context():
-            return get_upload_policy().as_dict()
+            self.assertEqual(0,SystemSettings.query.count());self.assertEqual(20*1024*1024,get_upload_policy().max_file_bytes)
+            self.assertEqual(SUPPORTED_EXTENSIONS,get_upload_policy().allowed_extensions)
+        self.assertEqual(21*1024*1024,self.app.config["MAX_CONTENT_LENGTH"]);self.assertEqual(before,self.snapshot())
 
-    def audits(self):
+    def test_saved_legacy_policy_is_preserved_but_cannot_reduce_or_expand_current_formats(self):
         with self.app.app_context():
-            return [dict(action=e.action, object_id=e.object_id, actor=e.actor_snapshot, details=e.details)
-                    for e in AdminAuditEvent.query.order_by(AdminAuditEvent.id)]
+            row=SystemSettings(id=1,max_upload_mb=1,allowed_extensions=["pdf"]);db.session.add(row);db.session.commit()
+            policy=get_upload_policy();self.assertEqual(20,policy.max_upload_mb);self.assertEqual(SUPPORTED_EXTENSIONS,policy.allowed_extensions)
+        before=self.snapshot();self.assertEqual(410,self.client.post("/admin/settings",data=dict(max_upload_mb="20",allowed_extensions=["exe"])).status_code)
+        self.assertEqual(before,self.snapshot())
 
-    def test_default_policy_is_read_only_and_has_known_byte_limit(self):
-        before = self.audits()
-        for _ in range(2):
-            self.assertEqual(200, self.client.get("/admin/settings").status_code)
-        self.assertEqual({"max_upload_mb": 20, "allowed_extensions": list(SUPPORTED_EXTENSIONS)}, self.policy())
-        with self.app.app_context():
-            self.assertEqual(0, SystemSettings.query.count())
-            self.assertEqual(20*1024*1024, get_upload_policy().max_file_bytes)
-        self.assertEqual(21*1024*1024, self.app.config["MAX_CONTENT_LENGTH"])
-        self.assertEqual(before, self.audits())
+    def test_archived_categories_not_offered_but_existing_category_stays_optional(self):
+        visible=self.category();archived=self.category("Архивная")
+        with self.app.app_context():archive_category(actor=db.session.get(User,self.ids["root"]),category_id=archived);db.session.commit()
+        client=self.app.test_client();self.login("employee",client=client)
+        page=client.get("/tasks/new").get_data(as_text=True)
+        self.assertIn('name="category_id"',page);self.assertIn("Без категории",page);self.assertIn("Оборудование",page);self.assertNotIn("Архивная",page)
+        for category in (str(visible),""):
+            response=client.post("/tasks/new",data=self.creation_form(client=client,category_id=category));self.assertEqual(302,response.status_code)
 
-    def test_create_rename_archive_and_noops_are_audited(self):
-        category_id = self.category("  Оборудование  ")
-        self.assertEqual("Оборудование", self.category_data(category_id)["name"])
-        for name in ("Техника", "Техника"):
-            self.assertEqual(302, self.client.post(f"/admin/categories/{category_id}/edit", data={"name": name}).status_code)
-        for _ in range(2):
-            self.assertEqual(302, self.client.post(f"/admin/categories/{category_id}/archive").status_code)
-        self.assertTrue(self.category_data(category_id)["is_archived"])
-        with self.app.app_context():
-            self.assertEqual([], active_categories())
-        entries = self.audits()
-        self.assertEqual(["category_created", "category_renamed", "category_archived"], [e["action"] for e in entries])
-        self.assertEqual("Оборудование", entries[1]["details"]["before"]["name"])
-        self.assertEqual("Техника", entries[1]["details"]["after"]["name"])
-        self.assertTrue(all(e["actor"]["role"] == "admin" for e in entries))
+    def test_unknown_or_archived_category_cannot_be_submitted(self):
+        archived=self.category()
+        with self.app.app_context():archive_category(actor=db.session.get(User,self.ids["root"]),category_id=archived);db.session.commit()
+        client=self.app.test_client();self.login("employee",client=client)
+        for category in (str(archived),"99999"):
+            response=client.post("/tasks/new",data=self.creation_form(client=client,category_id=category));self.assertEqual(400,response.status_code)
+        with self.app.app_context():self.assertEqual(0,Task.query.count())
 
-    def test_name_uniqueness_covers_archive_casefold_and_invalid_names(self):
-        category_id = self.category("Straße")
-        self.client.post(f"/admin/categories/{category_id}/archive")
-        before = self.audits()
-        for name in (" STRASSE ", "", "  ", "x"*81):
-            response = self.client.post("/admin/categories/new", data={"name": name})
-            self.assertEqual(400, response.status_code)
-            self.assertIn('aria-invalid="true"', response.get_data(as_text=True))
-        other = self.category("Другая")
-        checkpoint = self.audits()
-        response = self.client.post(f"/admin/categories/{other}/edit", data={"name": "STRASSE"})
-        self.assertEqual(400, response.status_code)
-        self.assertIn('value="STRASSE"', response.get_data(as_text=True))
-        self.assertIn(' open>', response.get_data(as_text=True))
-        self.assertEqual("Другая", self.category_data(other)["name"])
-        self.assertEqual(checkpoint, self.audits())
-        self.assertEqual(before, checkpoint[:-1])
+    def test_legacy_category_name_snapshot_and_history_survive_retirement(self):
+        ident=self.category();task_id=self.task(category_id=ident,category="Оборудование")
+        with self.app.app_context():rename_category(actor=db.session.get(User,self.ids["root"]),category_id=ident,name="Новое название");db.session.commit()
+        before=self.snapshot();client=self.app.test_client();self.login("employee",client=client)
+        page=client.get(f"/tasks/{task_id}").get_data(as_text=True);self.assertIn("Оборудование",page)
+        self.assertEqual(before,self.snapshot())
+        audit=self.client.get("/admin/audit").get_data(as_text=True);self.assertIn("Новое название",audit);self.assertIn("Оборудование",audit)
 
-    def test_sent_task_category_snapshot_history_and_free_text_are_preserved(self):
-        category_id = self.category()
-        task_id = self.task(status="completed", category=" Оборудование ", category_id=category_id,
-            sent_at=datetime(2026, 1, 1, tzinfo=timezone.utc), completed_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
-        free_id = self.task(category="Ручная категория Қазақша", category_id=None)
-        with self.app.app_context():
-            db.session.add(TaskEvent(task_id=task_id, actor_id=self.ids["employee"], event_type="created",
-                details={"category": " Оборудование "}))
-            db.session.commit()
-            before_tasks = db.session.execute(select(Task.__table__).order_by(Task.id)).all()
-            before_events = db.session.execute(select(TaskEvent.__table__)).all()
-        self.client.post(f"/admin/categories/{category_id}/edit", data={"name": "Новое название"})
-        self.client.post(f"/admin/categories/{category_id}/archive")
-        self.assertEqual(200, self.client.get("/admin/categories").status_code)
-        with self.app.app_context():
-            self.assertEqual(before_tasks, db.session.execute(select(Task.__table__).order_by(Task.id)).all())
-            self.assertEqual(before_events, db.session.execute(select(TaskEvent.__table__)).all())
-            self.assertEqual("Ручная категория Қазақша", db.session.get(Task, free_id).category)
-            self.assertEqual(" Оборудование ", db.session.get(Task, task_id).category)
-
-    def test_policy_updates_boundaries_canonical_order_and_audit_without_secrets(self):
-        for limit, formats in ((1, ["PNG", "pdf", "pdf"]), (20, list(SUPPORTED_EXTENSIONS))):
-            response = self.client.post("/admin/settings", data={"max_upload_mb": str(limit), "allowed_extensions": formats})
-            self.assertEqual(302, response.status_code)
-            expected = [ext for ext in SUPPORTED_EXTENSIONS if ext in {v.lower() for v in formats}]
-            self.assertEqual({"max_upload_mb": limit, "allowed_extensions": expected}, self.policy())
-        before = self.audits()
-        self.client.post("/admin/settings", data={"max_upload_mb": "20", "allowed_extensions": list(SUPPORTED_EXTENSIONS)})
-        self.assertEqual(before, self.audits())
-        self.assertEqual(["upload_policy_updated", "upload_policy_updated"], [e["action"] for e in before])
-        self.assertEqual(20, before[0]["details"]["before"]["max_upload_mb"])
-        self.assertEqual(1, before[0]["details"]["after"]["max_upload_mb"])
-        serialized = json.dumps(before)
-        for secret in ("root-password", "member-password", "password_hash", "secret_key", "postgresql://"):
-            self.assertNotIn(secret, serialized)
-
-    def test_invalid_numbers_and_extensions_leave_policy_and_audit_unchanged(self):
-        self.client.post("/admin/settings", data={"max_upload_mb": "5", "allowed_extensions": ["pdf"]})
-        before, audit = self.policy(), self.audits()
-        for limit in ("", "0", "-1", "21", "1.5", "1e1", "NaN", "True", "9"*5000):
-            response = self.client.post("/admin/settings", data={"max_upload_mb": limit, "allowed_extensions": ["pdf"]})
-            self.assertEqual(400, response.status_code)
-            self.assertNotIn(b"Traceback", response.data)
-        for ext in ("exe", "svg", "html", "jpeg", "../../png"):
-            response = self.client.post("/admin/settings", data={"max_upload_mb": "5", "allowed_extensions": ["pdf", ext]})
-            self.assertEqual(400, response.status_code)
-        self.assertEqual(before, self.policy())
-        self.assertEqual(audit, self.audits())
-        for limit in (True, False, 2.0, None):
-            with self.assertRaises(SettingsError):
-                validate_upload_policy(limit, ["pdf"])
-        for formats in ("pdf", {"pdf": True}, [None]):
-            with self.assertRaises(SettingsError):
-                validate_upload_policy(2, formats)
-
-    def test_empty_format_subset_is_explicit_and_does_not_expand_allowed_types(self):
-        self.assertEqual(302, self.client.post("/admin/settings", data={"max_upload_mb": "4"}).status_code)
-        self.assertEqual({"max_upload_mb": 4, "allowed_extensions": []}, self.policy())
-        with self.app.app_context():
-            self.assertEqual(0, len(get_upload_policy().allowed_extensions))
-        self.assertEqual(21*1024*1024, self.app.config["MAX_CONTENT_LENGTH"])
-
-    def test_restricting_formats_preserves_old_attachment_metadata_and_bytes(self):
-        task_id = self.task()
-        with tempfile.TemporaryDirectory(prefix="portal_case_") as directory:
-            old_file = Path(directory)/"existing-private-key"
-            old_file.write_bytes(b"original private attachment")
+    def test_old_files_remain_downloadable_when_legacy_policy_is_restrictive(self):
+        task_id=self.task()
+        with TemporaryDirectory(prefix="portal_t012_file_") as folder:
+            self.app.config["TASK_UPLOAD_DIR"]=folder;key="a"*32;payload=b"synthetic existing file";Path(folder,key).write_bytes(payload)
             with self.app.app_context():
-                db.session.add(TaskAttachment(task_id=task_id, uploaded_by_id=self.ids["employee"], storage_key=old_file.name,
-                    original_filename="Прежний.png", content_type="image/png", size_bytes=27))
-                db.session.commit()
-                before = db.session.execute(select(TaskAttachment.__table__)).all()
-            self.client.post("/admin/settings", data={"max_upload_mb": "1", "allowed_extensions": ["pdf"]})
-            self.assertEqual(b"original private attachment", old_file.read_bytes())
-            with self.app.app_context():
-                self.assertEqual(before, db.session.execute(select(TaskAttachment.__table__)).all())
+                db.session.add(SystemSettings(id=1,max_upload_mb=1,allowed_extensions=[]))
+                attachment=TaskAttachment(task_id=task_id,uploaded_by_id=self.ids["employee"],original_filename="old.xlsx",storage_key=key,content_type="application/octet-stream",size_bytes=len(payload));db.session.add(attachment);db.session.commit();aid=attachment.id
+            before=self.snapshot();self.assertEqual(410,self.client.post("/admin/settings",data=dict(max_upload_mb="1")).status_code)
+            with self.client.get(f"/tasks/attachments/{aid}/download") as response:self.assertEqual(payload,response.data)
+            self.assertEqual(payload,Path(folder,key).read_bytes());self.assertEqual(before,self.snapshot())
 
-    def test_management_pages_and_services_require_admin(self):
-        category_id = self.category()
-        before = self.audits()
-        for name in ("employee", "head"):
-            client = self.app.test_client()
-            self.login(name, client=client)
-            for url in ("/admin/categories", "/admin/settings"):
-                self.assertEqual(403, client.get(url).status_code)
-            for url in ("/admin/categories/new", f"/admin/categories/{category_id}/edit", f"/admin/categories/{category_id}/archive", "/admin/settings"):
-                self.assertEqual(403, client.post(url, data={"name": "Подмена", "actor_id": self.ids["root"], "max_upload_mb": "20"}).status_code)
-            page = client.get("/tasks/received").get_data(as_text=True)
-            self.assertNotIn('href="/admin/settings"', page)
-            self.assertNotIn('href="/admin/categories"', page)
-            with self.app.app_context():
-                actor = db.session.get(User, self.ids[name])
-                with self.assertRaises(PermissionError):
-                    create_category(actor=actor, name="Подмена")
-                db.session.rollback()
-                with self.assertRaises(PermissionError):
-                    update_upload_policy(actor=actor, max_upload_mb=1, allowed_extensions=[])
-                db.session.rollback()
-        self.assertEqual(before, self.audits())
-
-    def test_csrf_methods_and_unknown_category_are_checked(self):
-        category_id = self.category()
-        self.app.config["WTF_CSRF_ENABLED"] = True
-        for url in ("/admin/settings", "/admin/categories/new", f"/admin/categories/{category_id}/edit", f"/admin/categories/{category_id}/archive"):
-            self.assertEqual(400, self.client.post(url).status_code)
-        self.app.config["WTF_CSRF_ENABLED"] = False
-        self.assertEqual(405, self.client.get(f"/admin/categories/{category_id}/archive").status_code)
-        self.assertEqual(404, self.client.post("/admin/categories/999999/edit", data={"name": "Missing"}).status_code)
-        self.assertEqual(404, self.client.post("/admin/categories/999999/archive").status_code)
-
-    def test_category_commit_conflicts_roll_back_and_keep_form_input(self):
-        conflict = IntegrityError("synthetic", {}, Exception("conflict"))
-        with patch("app.admin.db.session.commit", side_effect=conflict):
-            response = self.client.post("/admin/categories/new", data={"name": "Не сохранено"})
-        self.assertEqual(400, response.status_code)
-        self.assertIn('value="Не сохранено"', response.get_data(as_text=True))
+    def test_internal_legacy_services_keep_admin_guard_and_name_validation(self):
+        ident=self.category("Straße")
         with self.app.app_context():
-            self.assertEqual(0, TaskCategory.query.count())
-        self.assertEqual([], self.audits())
-        category_id = self.category()
-        before, events = self.category_data(category_id), self.audits()
-        for action, data in (("edit", {"name": "Ошибка названия"}), ("archive", {})):
-            with patch("app.admin.db.session.commit", side_effect=conflict):
-                response = self.client.post(f"/admin/categories/{category_id}/{action}", data=data)
-            self.assertIn(response.status_code, (400, 302))
-            self.assertEqual(before, self.category_data(category_id))
-            self.assertEqual(events, self.audits())
-        self.assertEqual(200, self.client.get("/admin/categories").status_code)
+            admin=db.session.get(User,self.ids["root"]);archive_category(actor=admin,category_id=ident);db.session.commit()
+            for name in ("STRASSE","", " ","x"*81):
+                with self.assertRaises(SettingsError):create_category(actor=admin,name=name)
+            for name in ("employee","head","outsider"):
+                with self.assertRaises(PermissionError):create_category(actor=db.session.get(User,self.ids[name]),name="Недоступно")
+            db.session.rollback();self.assertEqual([],active_categories())
 
-    def test_policy_commit_conflict_rolls_back_and_preserves_submitted_fields(self):
-        self.client.post("/admin/settings", data={"max_upload_mb": "8", "allowed_extensions": ["pdf"]})
-        before, events = self.policy(), self.audits()
-        with patch("app.admin.db.session.commit", side_effect=IntegrityError("synthetic", {}, Exception("conflict"))):
-            response = self.client.post("/admin/settings", data={"max_upload_mb": "3", "allowed_extensions": ["png"]})
-        self.assertEqual(400, response.status_code)
-        self.assertIn('value="3"', response.get_data(as_text=True))
-        self.assertIn('value="png" checked', response.get_data(as_text=True))
-        self.assertEqual(before, self.policy())
-        self.assertEqual(events, self.audits())
-
-    def test_category_names_are_escaped_and_navigation_is_unambiguous(self):
-        self.category('<script>alert(1)</script>')
-        page = self.client.get("/admin/categories").get_data(as_text=True)
-        self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', page)
-        self.assertNotIn('<script>alert(1)</script>', page)
-        self.assertIn('href="/admin/categories" aria-current="page"', page)
-        self.assertNotIn('href="/admin/users" aria-current="page"', page)
-        page = self.client.get("/admin/settings").get_data(as_text=True)
-        self.assertIn('href="/admin/settings" aria-current="page"', page)
-
-    def test_invalid_persisted_policy_fails_closed_and_admin_can_repair_it(self):
+    def test_legacy_services_still_keep_existing_audit_data(self):
+        ident=self.category()
         with self.app.app_context():
-            db.session.add(SystemSettings(id=1, max_upload_mb=2, allowed_extensions=["exe"]))
-            db.session.commit()
-            with self.assertRaises(SettingsError):
-                get_upload_policy()
-        self.assertEqual(400, self.client.get("/admin/settings").status_code)
-        self.assertEqual(302, self.client.post("/admin/settings", data={"max_upload_mb": "2", "allowed_extensions": ["pdf"]}).status_code)
-        self.assertEqual(["pdf"], self.policy()["allowed_extensions"])
+            admin=db.session.get(User,self.ids["root"])
+            for _ in range(2):rename_category(actor=admin,category_id=ident,name="Переименовано");archive_category(actor=admin,category_id=ident)
+            update_upload_policy(actor=admin,max_upload_mb="10",allowed_extensions=["pdf"]);db.session.commit()
+            self.assertEqual(["category_created","category_renamed","category_archived","upload_policy_updated"],[e.action for e in AdminAuditEvent.query.order_by(AdminAuditEvent.id)])
+            self.assertEqual(20,get_upload_policy().max_upload_mb)
+
+    def test_invalid_legacy_policy_values_do_not_change_storage(self):
+        before=self.snapshot()
+        for limit,formats in ((0,["pdf"]),(21,["pdf"]),("bad",["png"]),(10,["exe"])):
+            with self.assertRaises(SettingsError):validate_upload_policy(limit,formats)
+        self.assertEqual(before,self.snapshot())

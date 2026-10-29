@@ -23,28 +23,55 @@ from .permissions import (
     can_submit_result, can_review_recipient_result, can_return_result, can_reject_task, is_task_dispatched,
     can_answer_clarification, can_cancel_task, can_change_working_status, can_claim_task,
     can_reassign_task, can_review_result, can_change_deadline, can_contribute_task,
+    can_release_task, can_complete_task, is_platform_user, is_recipient_employee, is_recipient_head,
     get_visible_attachment_or_404, get_visible_notification_or_404, get_visible_task_or_404,
 )
 from .workflow import (
-    WorkflowConflict, transition_approval, transition_execution, transition_review, update_draft,
+    WorkflowConflict, transition_approval, transition_execution, transition_review, transition_completion, update_draft,
     WORKING_TRANSITIONS, WorkflowError, change_working_status, claim_task, create_task,
-    reassign_task, update_task_before_acceptance, answer_task_clarification,
+    reassign_task, update_task_before_acceptance, answer_task_clarification, make_creation_key,
     cancel_task, confirm_task_result, return_task_for_revision,
     add_task_attachment, add_task_comment, change_task_deadline,
 )
 from .storage import UploadBatch, UploadError, attachment_path, discard_upload, save_upload
-from .task_board import load_board_projection
+from .task_board import load_board_projection, task_card_options
 from .task_presentation import task_progress
 
 
 tasks_bp = Blueprint("tasks", __name__, url_prefix="/tasks")
 
 
+@tasks_bp.before_request
+@login_required
+def guard_unimplemented_mutations():
+    """Retired stages cannot become aliases of current business actions."""
+    endpoint = request.endpoint.rsplit(".", 1)[-1]
+    retired = {"task_approval", "task_review", "task_working_status", "task_confirm",
+               "task_answer_clarification", "task_edit"}
+    if endpoint not in retired | {"task_execution"} or request.method == "GET" and endpoint != "task_edit":
+        return None
+    if not is_platform_user(current_user):
+        abort(403)
+    get_visible_task_or_404((request.view_args or {}).get("task_id"), current_user)
+    if current_user.role == "admin":
+        abort(403)
+    if endpoint in retired:
+        abort(410, description="Этот этап удалён из процесса работы задач")
+    action = (request.view_args or {}).get("action")
+    if action in ("start", "request_clarification", "answer_clarification"):
+        abort(410, description="Этот этап удалён из процесса работы задач")
+    if action not in ("assign", "reassign"):
+        abort(400)
+    return None
+
+
 @tasks_bp.app_template_filter("task_progress")
 def describe_task_progress(task):
     return task_progress(task, current_user)
 
+
 STATUS_LABELS = {
+    "new": "Новая",
     "draft": "Черновик",
     "pending_approval": "На согласовании",
     "awaiting_assignment": "Ожидает назначения",
@@ -53,7 +80,7 @@ STATUS_LABELS = {
     "awaiting_clarification": "Ожидает уточнения",
     "recipient_review": "На проверке отдела-получателя",
     "sender_acceptance": "На приёмке отдела-отправителя",
-    "completed": "Завершена",
+    "completed": "Выполнено",
     "cancelled": "Отменена",
     "rejected": "Отклонена",
 }
@@ -86,7 +113,7 @@ def _parse_form_deadline(raw_value):
             value = value.replace(tzinfo=ZoneInfo(current_app.config["TASK_TIMEZONE"]))
         return value.astimezone(timezone.utc)
     except (TypeError, ValueError):
-        raise WorkflowError("Укажите срок в корректном формате") from None
+        raise WorkflowError("Укажите срок в корректном формате", "due_at") from None
 
 
 @tasks_bp.app_template_filter("task_datetime")
@@ -137,14 +164,14 @@ def _is_overdue(task):
 
 
 LIST_ENDPOINTS = {"received": "tasks.received_tasks", "sent": "tasks.sent_tasks", "completed": "tasks.completed_tasks"}
-LIST_LABELS = {"received": "Задачи нашему отделу", "sent": "Задачи другим отделам", "completed": "Завершённые"}
+LIST_LABELS = {"received": "Нашему отделу", "sent": "Другим отделам", "completed": "Завершённые"}
 
 
 def _visible_task_query(direction):
     query = Task.query.filter(task_visibility_clause(current_user))
     if direction == "completed":
         return query.filter(Task.status.in_(TERMINAL))
-    query = query.filter(~Task.status.in_(TERMINAL))
+    query = query.filter(Task.status.in_(("new", "in_progress")))
     if direction == "received":
         query = query.filter(dispatched_clause())
     if current_user.role != "admin":
@@ -156,18 +183,20 @@ def _visible_task_query(direction):
 def _attention(task):
     if current_user.role != "head":
         return None
-    if task.due_at is None and is_task_dispatched(task) and can_change_deadline(current_user, task):
-        return "Укажите срок задачи"
-    for predicate, label in ((can_approve_task, "Требует согласования"),
-        (can_assign_task, "Назначьте исполнителя"),
-        (can_review_recipient_result, "Проверьте результат вашего отдела"),
-        (can_review_result, "Ожидает вашей приёмки"),
-        (can_answer_clarification, "Требуется ответ на уточнение")):
-        if predicate(current_user, task):
-            return label
+    if can_assign_task(current_user, task):
+        return "Назначьте исполнителя"
     if can_reassign_task(current_user, task) and not has_available_assignee(task):
         return "Нужно переназначить исполнителя"
     return None
+
+
+def _task_ordering(direction):
+    if direction == "completed":
+        finished_at = case((Task.status == "completed", Task.completed_at), else_=Task.closed_at)
+        return (finished_at.is_(None), finished_at.desc(), Task.created_at.desc(), Task.id.desc())
+    priority = case((Task.priority == "urgent", 0), (Task.priority == "high", 1),
+        (Task.priority == "normal", 2), (Task.priority == "low", 3), else_=4)
+    return (priority, Task.due_at.is_(None), Task.due_at.asc(), Task.created_at.desc(), Task.id.desc())
 
 
 def _list_context(direction):
@@ -181,21 +210,9 @@ def _list_context(direction):
         field = Task.recipient_department_id if completed_scope == "received" else Task.sender_department_id
         query = query.filter(field == current_user.department_id)
     list_total = query.count() if completed_scope else counts[direction]
-    if direction == "completed":
-        finished_at = case(
-            (Task.status == "completed", func.coalesce(Task.completed_at, Task.closed_at)),
-            else_=Task.closed_at,
-        )
-        ordered = query.order_by(finished_at.is_(None), finished_at.desc(), Task.created_at.desc(), Task.id.desc())
-    else:
-        priority_order = case(
-            (Task.priority == "urgent", 0), (Task.priority == "high", 1),
-            (Task.priority == "normal", 2), (Task.priority == "low", 3), else_=4,
-        )
-        ordered = query.order_by(priority_order, Task.due_at.is_(None), Task.due_at.asc(),
-                                 Task.created_at.desc(), Task.id.desc())
+    ordered = query.order_by(*_task_ordering(direction))
     moment = _now()
-    view = "board" if request.args.get("view", "board") == "board" else "list"
+    view = "list" if request.args.get("view") == "list" else "board"
     board_data = {}
     groups = []
     if view == "board":
@@ -207,8 +224,11 @@ def _list_context(direction):
             counts[direction] = pagination.total
         for task in tasks:
             board_data[task.id] = dict(id=task.id, title=task.title, revision=task.revision,
+                is_rework=task.is_rework, rework_cycle=task.rework_cycle,
+                unavailable_assignee=task.status == "in_progress" and not has_available_assignee(task),
                 status=task.status, detail_url=url_for("tasks.task_detail", task_id=task.id),
-                actions=projection.actions[task.id], assignee_id=task.assignee_id,
+                actions=projection.actions[task.id], assignee_ids=task.assignee_ids,
+                assignees=[dict(id=u.id, full_name=u.full_name, is_available=is_recipient_employee(u, task)) for u in task.assignees],
                 group=projection.group_keys[task.status],
                 comment_count=projection.card_counts[task.id]["comments"],
                 attachment_count=projection.card_counts[task.id]["attachments"],
@@ -216,11 +236,11 @@ def _list_context(direction):
                 candidates=[dict(id=u.id, name=u.full_name, role="Начальник отдела" if u.role == "head" else "Сотрудник отдела")
                     for u in projection.candidates[task.id]])
     else:
-        pagination = ordered.options(undefer("*")).paginate(
+        pagination = ordered.options(*task_card_options()).paginate(
             page=min(max(1, request.args.get("page", 1, type=int)), max(1, (list_total + 24) // 25)),
             per_page=25, error_out=False)
         tasks = pagination.items
-    columns = [key for key in STATUS_LABELS if key not in TERMINAL and (direction != "received" or key not in PRE_DISPATCH)]
+    columns = ["completed", "cancelled", "rejected"] if direction == "completed" else ["new", "in_progress"]
     context = dict(tasks=tasks, direction=direction, pagination=pagination,
         list_labels=({"received": "Полученные поручения", "sent": "Отправленные поручения", "completed": "Завершённые"}
                      if current_user.role == "admin" else LIST_LABELS), list_endpoints=LIST_ENDPOINTS,
@@ -230,7 +250,8 @@ def _list_context(direction):
         may_create=can_create_task(current_user),
         deadline_states={task.id: _deadline_state(task, moment) for task in tasks},
         attention={task.id: _attention(task) for task in tasks},
-        status_labels=STATUS_LABELS, priority_labels=PRIORITY_LABELS)
+        unavailable_assignees={task.id: task.status == "in_progress" and not has_available_assignee(task) for task in tasks},
+        status_labels={key:STATUS_LABELS[key] for key in TASK_STATUSES}, priority_labels=PRIORITY_LABELS)
     if request.args.get("fragment") is not None:
         if request.args.get("fragment") != "board" or view != "board":
             abort(400)
@@ -317,7 +338,12 @@ def notification_mark_all_read():
 def _uploads_boundary(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        with UploadBatch() as batch:
+        from .settings import UploadPolicy
+        policy = UploadPolicy() if request.endpoint in {"tasks.task_new", "tasks.task_execution", "tasks.task_assign",
+            "tasks.task_claim", "tasks.task_reassign", "tasks.task_release", "tasks.task_complete",
+            "tasks.task_return", "tasks.task_cancel", "tasks.task_reject", "tasks.task_deadline",
+            "tasks.task_comment", "tasks.task_upload"} else None
+        with UploadBatch(policy=policy) as batch:
             g.task_upload_batch = batch
             try:
                 return view(*args, **kwargs)
@@ -343,34 +369,34 @@ def _commit_task_action():
         batch.keep()
 
 
-def _strict_form(allowed, *, upload=False):
-    if set(request.form) - set(allowed) or any(len(request.form.getlist(key)) != 1 for key in request.form):
+def _strict_form(allowed, *, upload=False, multiple=()):
+    if set(request.form) - set(allowed) or any(key not in multiple and len(request.form.getlist(key)) != 1 for key in request.form):
         raise WorkflowError("Форма содержит неподдерживаемые или повторяющиеся поля")
     if set(request.files) - ({"attachment"} if upload else set()):
         raise WorkflowError("Форма содержит неподдерживаемые вложения")
 
 
-def _draft_payload():
+def _creation_payload():
     return dict(recipient_department_id=request.form.get("recipient_department_id"),
         title=request.form.get("title"), description=request.form.get("description"),
         due_at=_parse_form_deadline(request.form.get("due_at", "")),
         priority=request.form.get("priority", "normal"), category_id=request.form.get("category_id"),
-        contact_person=request.form.get("contact_person"))
+        contact_person=request.form.get("contact_person"), creation_key=request.form.get("creation_key"))
 
 
-DRAFT_FIELDS = {"csrf_token", "title", "description", "recipient_department_id",
-                "due_at", "priority", "category_id", "contact_person"}
+CREATE_FIELDS = {"csrf_token", "title", "description", "recipient_department_id",
+                 "due_at", "priority", "category_id", "contact_person", "creation_key"}
 
 
-def _render_draft(task=None, error=None):
-    from .settings import active_categories, get_upload_policy, SettingsError
-    try:
-        policy = get_upload_policy()
-    except SettingsError:
-        policy = None
-    return render_template("tasks/form.html", task=task, departments=_departments_for_form(),
+def _render_creation(error=None):
+    from .settings import active_categories, UploadPolicy
+    policy = UploadPolicy()
+    key = request.form.get("creation_key") if request.method == "POST" else None
+    if key is None or getattr(error, "field", None) == "creation_key":
+        key = make_creation_key(current_user)
+    return render_template("tasks/form.html", task=None, departments=_departments_for_form(),
         categories=active_categories(), priority_labels=PRIORITY_LABELS, upload_policy=policy,
-        form_error=str(error) if error else None, error_field=getattr(error, "field", None))
+        creation_key=key, form_error=str(error) if error else None, error_field=_action_error_field(error))
 
 
 @tasks_bp.route("/new", methods=["GET", "POST"])
@@ -380,31 +406,29 @@ def task_new():
     if not can_create_task(current_user):
         abort(403)
     if request.method == "GET":
-        return _render_draft()
+        return _render_creation()
     try:
-        _strict_form(DRAFT_FIELDS, upload=True)
+        _strict_form(CREATE_FIELDS, upload=True)
+        payload = _creation_payload()
         files = _prepare_uploads()
-        task = create_task(actor=current_user, prepared_files=files, **_draft_payload())
+        task = create_task(actor=current_user, prepared_files=files, **payload)
         _commit_task_action()
     except PermissionError:
         db.session.rollback()
         abort(403)
     except (WorkflowError, UploadError) as error:
         db.session.rollback()
-        return _render_draft(error=error), 400
+        return _render_creation(error), 409 if isinstance(error, WorkflowConflict) else 400
     except (SQLAlchemyError, OSError):
         db.session.rollback()
-        return _render_draft(error=WorkflowError("Не удалось сохранить черновик. Повторите попытку")), 500
-    flash("Черновик сохранён. Отдел-получатель пока его не видит", "success")
+        return _render_creation(WorkflowError("Не удалось отправить задачу. Повторите попытку с той же формой")), 500
+    flash("Задача отправлена в другой отдел", "success")
     return redirect(url_for("tasks.task_detail", task_id=task.id))
 
 
 def _detail_upload_policy():
-    from .settings import get_upload_policy, SettingsError
-    try:
-        return get_upload_policy()
-    except SettingsError:
-        return None
+    from .settings import UploadPolicy
+    return UploadPolicy()
 
 
 def _comment_files(task):
@@ -417,26 +441,31 @@ def _comment_files(task):
 
 
 HISTORY_LABELS = {
+    "claimed": "Сотрудник взял задачу", "released": "Исполнитель снял задачу с себя",
     "created": "Задача создана", "edited": "Поручение изменено", "assigned": "Исполнитель назначен",
-    "reassigned": "Исполнитель изменён", "status_changed": "Статус изменён", "work_started": "Работа начата",
+    "reassigned": "Состав исполнителей изменён", "status_changed": "Статус изменён", "work_started": "Работа начата",
     "submitted_for_approval": "Заявка подана на согласование", "approval_withdrawn": "Автор отозвал заявку",
     "approval_returned": "Заявка возвращена автору", "approved_and_sent": "Задача одобрена и отправлена",
     "sent": "Задача отправлена", "clarification_requested": "Запрошено уточнение",
     "clarification_answered": "Получен ответ на уточнение", "result_submitted": "Результат передан на внутреннюю проверку",
     "result_forwarded": "Результат передан отправителю", "returned_for_revision": "Задача возвращена на доработку",
-    "completed": "Результат подтверждён", "cancelled": "Задача отменена", "rejected": "Задача отклонена получателем",
+    "completed": "Задача выполнена", "cancelled": "Задача отменена", "rejected": "Задача отклонена получателем",
     "deadline_changed": "Срок изменён", "comment_added": "Добавлен комментарий", "attachment_added": "Добавлено вложение",
     "workflow_migrated": "Переход на новый процесс",
 }
 HISTORY_FIELDS = {"title": "Название", "description": "Описание", "status": "Статус", "priority": "Приоритет",
-    "assignee_id": "Исполнитель", "author_id": "Автор", "sender_department_id": "Отдел-отправитель",
+    "assignee_id": "Исполнитель (прежняя запись)", "assignees": "Состав исполнителей", "author_id": "Автор", "sender_department_id": "Отдел-отправитель",
     "recipient_department_id": "Отдел-получатель", "category": "Категория", "contact_person": "Контактное лицо",
-    "due_at": "Срок", "sent_at": "Отправка", "completed_at": "Завершение", "closed_at": "Закрытие"}
+    "due_at": "Срок", "sent_at": "Отправка", "completed_at": "Завершение", "closed_at": "Закрытие", "is_rework": "На доработке", "rework_cycle": "Цикл доработки"}
 
 
 def _history_value(field, value):
     if value is None or value == "":
         return "Не указано"
+    if field == "assignees":
+        return ", ".join(str(u.get("name", "Имя не сохранено")) for u in value if isinstance(u, dict)) or "Не назначены"
+    if field == "is_rework":
+        return "Да" if value else "Нет"
     if field == "status":
         return STATUS_LABELS.get(value, {"new": "Новая (прежний процесс)", "accepted": "Принята (прежний процесс)",
             "ready": "Готова (прежний процесс)"}.get(value, "Историческое состояние"))
@@ -459,6 +488,8 @@ def _history_entries(task):
         details = event.details or {}
         before, after = details.get("before", {}), details.get("after", {})
         label = HISTORY_LABELS.get(event.event_type, "Историческое событие")
+        if "assignee_ids" in after:
+            label = {"assigned":"Состав исполнителей назначен", "reassigned":"Состав исполнителей изменён"}.get(event.event_type,label)
         if event.event_type in ("created", "edited") and after.get("status") == "draft":
             label = "Черновик создан" if event.event_type == "created" else "Черновик изменён"
         snapshot = event.actor_snapshot
@@ -477,44 +508,43 @@ def _history_entries(task):
 
 
 def _available_task_actions(task):
-    """One capability list for detail forms, board buttons and drag targets."""
+    """Publish only implemented actions; their canonical URLs are authoritative."""
     definitions = (
-        ("approval", "submit", "Передать поручение на согласование начальнику", "pending_approval", can_submit_for_approval),
-        ("approval", "withdraw", "Отозвать в черновик", "draft", can_withdraw_approval),
-        ("approval", "return_draft", "Вернуть автору в черновик", "draft", can_return_approval),
-        ("approval", "approve", "Одобрить и отправить поручение в другой отдел", "awaiting_assignment", can_approve_task),
-        ("approval", "send", "Отправить поручение в другой отдел", "awaiting_assignment", can_send_task),
-        ("execution", "assign", "Назначить исполнителя", "assigned", can_assign_task),
-        ("execution", "reassign", "Переназначить исполнителя", task.status, can_reassign_task),
-        ("execution", "start", "Начать работу", "in_progress", can_start_task),
-        ("execution", "request_clarification", "Запросить уточнение", "awaiting_clarification", can_request_clarification),
-        ("execution", "answer_clarification", "Ответить на уточнение", "in_progress", can_answer_clarification),
-        ("review", "submit_result", "Передать результат начальнику своего отдела", "recipient_review", can_submit_result),
-        ("review", "forward_result", "Передать готовый результат отделу-заказчику", "sender_acceptance", can_review_recipient_result),
-        ("review", "return_result", "Вернуть исполнителю на доработку", "in_progress", can_return_result),
-        ("review", "complete", "Принять результат и завершить поручение", "completed", can_review_result),
-        ("review", "cancel", "Отменить задачу", "cancelled", can_cancel_task),
-        ("review", "reject", "Отклонить задачу", "rejected", can_reject_task),
-        ("review", "deadline", "Изменить срок", task.status,
-            lambda user, item: is_task_dispatched(item) and can_change_deadline(user, item)),
+        ("assign", "Назначить исполнителей", "in_progress", "execution", can_assign_task),
+        ("claim", "Присоединиться" if task.status == "in_progress" else "Взять задачу", "in_progress", "execution", can_claim_task),
+        ("reassign", "Изменить состав исполнителей", "in_progress", "execution", can_reassign_task),
+        ("release", "Снять задачу с себя", "new" if len(task.assignee_ids) == 1 else "in_progress", "execution", can_release_task),
+        ("complete", "Выполнено", "completed", "review", can_complete_task),
+        ("return", "Вернуть на доработку", "in_progress", "review", can_return_result),
+        ("cancel", "Отменить задачу", "cancelled", "review", can_cancel_task),
+        ("reject", "Отклонить задачу", "rejected", "review", can_reject_task),
+        ("deadline", "Изменить срок", task.status, "review", can_change_deadline),
     )
     return [dict(key=key, label=label, target=target, group=group,
-        url=url_for(f"tasks.task_{group}", task_id=task.id, action=key),
-        assignee=key in ("assign", "reassign"), deadline=key == "deadline", terminal=target in TERMINAL)
-        for group,key,label,target,predicate in definitions if predicate(current_user,task)]
+        url=url_for(f"tasks.task_{key}", task_id=task.id), assignee=key in ("assign", "reassign"),
+        deadline=key == "deadline", terminal=target in TERMINAL) for key,label,target,group,predicate in definitions if predicate(current_user,task)]
 
 
 def _assignee_candidates(task, actions):
     if not any(action["assignee"] for action in actions):
         return []
-    return User.query.filter(User.department_id == task.recipient_department_id,
-        User.role.in_(("employee", "head")), User.is_blocked.is_(False)).order_by(User.full_name, User.id).all()
+    query = User.query.filter(User.department_id == task.recipient_department_id,
+        User.role.in_(("employee", "head")), User.is_blocked.is_(False))
+    return query.order_by(User.full_name, User.id).all()
 
 
-def _detail_context(task, *, action_error=None, failed_action=None):
+def _action_error_field(error):
+    return "attachment" if isinstance(error, UploadError) else getattr(error, "field", None)
+
+
+def _detail_context(task, *, action_error=None, failed_action=None, action_error_field=None):
     actions = _available_task_actions(task)
     candidates = _assignee_candidates(task, actions)
+    may_contribute = can_contribute_task(current_user, task)
+    if action_error and not action_error_field and not request.form.get("comment", "").strip():
+        action_error_field = "comment"
     return dict(task=task, status_labels=STATUS_LABELS, task_actions=actions,
+        action_urls={action["key"]: action["url"] for action in actions},
         deadline_state=_deadline_state(task, _now()), attention_label=_attention(task),
         history_entries=_history_entries(task),
         back_endpoint="tasks.completed_tasks" if task.status in TERMINAL else (
@@ -529,16 +559,18 @@ def _detail_context(task, *, action_error=None, failed_action=None):
         was_sent=is_task_dispatched(task),
         unavailable_assignee=task.status in ("assigned", "in_progress", "awaiting_clarification",
             "recipient_review", "sender_acceptance") and not has_available_assignee(task),
-        action_error=action_error, failed_action=failed_action,
+        action_error=action_error, failed_action=failed_action, action_error_field=action_error_field,
         may_claim=False, may_reassign=False, may_review=False, may_answer=False,
-        may_cancel=False, may_change_deadline=False, may_contribute=can_contribute_task(current_user, task),
+        may_cancel=False, may_change_deadline=can_change_deadline(current_user, task), may_contribute=may_contribute,
+        comment_url=url_for("tasks.task_comment", task_id=task.id) if may_contribute else None,
+        upload_url=url_for("tasks.task_upload", task_id=task.id) if may_contribute else None,
         upload_policy=_detail_upload_policy(), comment_files=_comment_files(task),
         assignee_candidates=candidates, working_targets=())
 
 
-def _detail_response(task, *, action_error=None, failed_action=None):
+def _detail_response(task, *, action_error=None, failed_action=None, action_error_field=None):
     return render_template("tasks/detail.html", **_detail_context(
-        task, action_error=action_error, failed_action=failed_action))
+        task, action_error=action_error, failed_action=failed_action, action_error_field=action_error_field))
 
 
 @tasks_bp.after_request
@@ -585,7 +617,7 @@ def task_approval(task_id, action):
     except (WorkflowError, UploadError) as error:
         db.session.rollback()
         task = get_visible_task_or_404(task_id, current_user)
-        return _detail_response(task, action_error=str(error), failed_action=action), (
+        return _detail_response(task, action_error=str(error), action_error_field=_action_error_field(error), failed_action=action), (
             409 if isinstance(error, WorkflowConflict) else 400)
     except (SQLAlchemyError, OSError):
         db.session.rollback()
@@ -606,6 +638,8 @@ def _execution_response(task_id, action=None, *, status_alias=False):
     task = get_visible_task_or_404(task_id, current_user)
     if current_user.role == "admin":
         abort(403)
+    if not is_recipient_employee(current_user, task) or action in ("assign", "reassign") and not is_recipient_head(current_user, task):
+        abort(403)
     try:
         if status_alias:
             action = {"in_progress": "start", "awaiting_clarification": "request_clarification"}.get(request.form.get("status"))
@@ -613,13 +647,13 @@ def _execution_response(task_id, action=None, *, status_alias=False):
                 raise WorkflowError("Недопустимый переход рабочего статуса")
         allowed = {"csrf_token", "revision", "comment"}
         if action in ("assign", "reassign"):
-            allowed.add("assignee_id")
+            allowed.add("assignee_ids")
         if status_alias:
             allowed.add("status")
-        _strict_form(allowed, upload=True)
+        _strict_form(allowed, upload=True, multiple=("assignee_ids",))
         task = transition_execution(task=task, actor=current_user, action=action,
             expected_revision=request.form.get("revision"), comment=request.form.get("comment"),
-            assignee_id=request.form.get("assignee_id"), prepared_files=_prepare_uploads())
+            assignee_ids=request.form.getlist("assignee_ids") if action in ("assign", "reassign") else None, prepared_files=_prepare_uploads())
         _commit_task_action()
     except PermissionError:
         db.session.rollback()
@@ -627,7 +661,7 @@ def _execution_response(task_id, action=None, *, status_alias=False):
     except (WorkflowError, UploadError) as error:
         db.session.rollback()
         task = get_visible_task_or_404(task_id, current_user)
-        return _detail_response(task, action_error=str(error), failed_action=action), (
+        return _detail_response(task, action_error=str(error), action_error_field=_action_error_field(error), failed_action=action), (
             409 if isinstance(error, WorkflowConflict) else 400)
     except (SQLAlchemyError, OSError):
         db.session.rollback()
@@ -651,19 +685,20 @@ def task_assign(task_id):
 
 
 @_uploads_boundary
-def _review_response(task_id, action, *, reason_alias=False):
+def _completion_response(task_id, action):
     task = get_visible_task_or_404(task_id, current_user)
     if current_user.role == "admin":
         abort(403)
+    from .permissions import is_sender_employee, is_sender_head
+    if action in ("complete", "reject"):
+        if not is_recipient_employee(current_user, task):
+            abort(403)
+    elif not is_sender_employee(current_user, task) or not (is_sender_head(current_user, task) or current_user.id == task.author_id):
+        abort(403)
     try:
-        allowed = {"csrf_token", "revision", "reason" if reason_alias else "comment"}
-        if action == "deadline":
-            allowed.add("due_at")
-        _strict_form(allowed, upload=True)
-        task = transition_review(task=task, actor=current_user, action=action,
-            expected_revision=request.form.get("revision"),
-            comment=request.form.get("reason" if reason_alias else "comment"),
-            due_at=_parse_form_deadline(request.form.get("due_at", "")) if action == "deadline" else None, prepared_files=_prepare_uploads())
+        _strict_form({"csrf_token", "revision", "comment"}, upload=True)
+        task = transition_completion(task=task, actor=current_user, action=action,
+            expected_revision=request.form.get("revision"), comment=request.form.get("comment"), prepared_files=_prepare_uploads())
         _commit_task_action()
     except PermissionError:
         db.session.rollback()
@@ -671,13 +706,11 @@ def _review_response(task_id, action, *, reason_alias=False):
     except (WorkflowError, UploadError) as error:
         db.session.rollback()
         task = get_visible_task_or_404(task_id, current_user)
-        return _detail_response(task, action_error=str(error), failed_action=action), (
-            409 if isinstance(error, WorkflowConflict) else 400)
+        return _detail_response(task, action_error=str(error), action_error_field=_action_error_field(error), failed_action=action), 409 if isinstance(error, WorkflowConflict) else 400
     except (SQLAlchemyError, OSError):
         db.session.rollback()
         task = get_visible_task_or_404(task_id, current_user)
-        return _detail_response(task, action_error="Не удалось сохранить действие. Повторите попытку",
-            failed_action=action), 500
+        return _detail_response(task, action_error="Не удалось сохранить действие. Повторите попытку", failed_action=action), 500
     flash("Действие сохранено", "success")
     return redirect(url_for("tasks.task_detail", task_id=task.id))
 
@@ -685,19 +718,19 @@ def _review_response(task_id, action, *, reason_alias=False):
 @tasks_bp.route("/<int:task_id>/review/<action>", methods=["POST"])
 @task_user_required
 def task_review(task_id, action):
-    return _review_response(task_id, action)
+    abort(410, description="Этапы проверки результата удалены")
 
 
 @tasks_bp.route("/<int:task_id>/reject", methods=["POST"])
 @task_user_required
 def task_reject(task_id):
-    return _review_response(task_id, "reject")
+    return _completion_response(task_id, "reject")
 
 
 @tasks_bp.route("/<int:task_id>/claim", methods=["POST"])
 @task_user_required
 def task_claim(task_id):
-    return _perform_task_action(task_id, claim_task)
+    return _execution_response(task_id, "claim")
 
 
 @tasks_bp.route("/<int:task_id>/reassign", methods=["POST"])
@@ -706,22 +739,34 @@ def task_reassign(task_id):
     return _execution_response(task_id, "reassign")
 
 
+@tasks_bp.route("/<int:task_id>/release", methods=["POST"])
+@task_user_required
+def task_release(task_id):
+    return _execution_response(task_id, "release")
+
+
 @tasks_bp.route("/<int:task_id>/status", methods=["POST"])
 @task_user_required
 def task_working_status(task_id):
     return _execution_response(task_id, status_alias=True)
 
 
+@tasks_bp.route("/<int:task_id>/complete", methods=["POST"])
+@task_user_required
+def task_complete(task_id):
+    return _completion_response(task_id, "complete")
+
+
 @tasks_bp.route("/<int:task_id>/confirm", methods=["POST"])
 @task_user_required
 def task_confirm(task_id):
-    return _review_response(task_id, "complete")
+    abort(410, description="Подтверждение отправителем больше не требуется")
 
 
 @tasks_bp.route("/<int:task_id>/return", methods=["POST"])
 @task_user_required
 def task_return(task_id):
-    return _review_response(task_id, "return_result")
+    return _completion_response(task_id, "return")
 
 
 @tasks_bp.route("/<int:task_id>/clarification", methods=["POST"])
@@ -733,13 +778,35 @@ def task_answer_clarification(task_id):
 @tasks_bp.route("/<int:task_id>/cancel", methods=["POST"])
 @task_user_required
 def task_cancel(task_id):
-    return _review_response(task_id, "cancel", reason_alias=True)
+    return _completion_response(task_id, "cancel")
 
 
 @tasks_bp.route("/<int:task_id>/deadline", methods=["POST"])
 @task_user_required
+@_uploads_boundary
 def task_deadline(task_id):
-    return _review_response(task_id, "deadline")
+    task = get_visible_task_or_404(task_id, current_user)
+    from .permissions import is_sender_head
+    if not is_sender_head(current_user, task):
+        abort(403)
+    try:
+        _strict_form({"csrf_token", "revision", "comment", "due_at"}, upload=True)
+        task = change_task_deadline(task=task, actor=current_user,
+            expected_revision=request.form.get("revision"), comment=request.form.get("comment"),
+            due_at=_parse_form_deadline(request.form.get("due_at")), prepared_files=_prepare_uploads())
+        _commit_task_action()
+    except PermissionError:
+        db.session.rollback()
+        abort(403)
+    except (WorkflowError, UploadError) as error:
+        db.session.rollback()
+        return _detail_response(get_visible_task_or_404(task_id, current_user),
+            action_error=str(error), action_error_field=_action_error_field(error), failed_action="deadline"), 409 if isinstance(error, WorkflowConflict) else 400
+    except (SQLAlchemyError, OSError):
+        db.session.rollback()
+        return _detail_response(get_visible_task_or_404(task_id, current_user),
+            action_error="Не удалось сохранить изменение срока и файлы", failed_action="deadline"), 500
+    return redirect(url_for("tasks.task_detail", task_id=task.id))
 
 
 @tasks_bp.route("/<int:task_id>/comments", methods=["POST"])
@@ -758,14 +825,15 @@ def task_upload(task_id):
 
 def _comment_response(task_id, require_file=False):
     task = get_visible_task_or_404(task_id, current_user)
-    if not can_contribute_task(current_user, task) or "revision" not in request.form:
+    if current_user.role == "admin":
         abort(403)
     try:
         _strict_form({"csrf_token", "revision", "comment"}, upload=True)
         files = _prepare_uploads()
         if require_file and not files:
             raise WorkflowError("Выберите файл")
-        add_task_comment(task=task, actor=current_user, comment=request.form.get("comment"),
+        method = add_task_attachment if require_file else add_task_comment
+        method(task=task, actor=current_user, comment=request.form.get("comment"),
             expected_revision=request.form.get("revision"), prepared_files=files)
         _commit_task_action()
     except PermissionError:
@@ -774,7 +842,7 @@ def _comment_response(task_id, require_file=False):
     except (WorkflowError, UploadError) as error:
         db.session.rollback()
         task = get_visible_task_or_404(task_id, current_user)
-        return _detail_response(task, action_error=str(error), failed_action="comment"), (
+        return _detail_response(task, action_error=str(error), action_error_field=_action_error_field(error), failed_action="comment"), (
             409 if isinstance(error, WorkflowConflict) else 400)
     except (SQLAlchemyError, OSError):
         db.session.rollback()
@@ -807,26 +875,5 @@ def task_download(attachment_id):
 @task_user_required
 @_uploads_boundary
 def task_edit(task_id):
-    task = get_visible_task_or_404(task_id, current_user)
-    if not can_edit_draft(current_user, task):
-        abort(403)
-    if request.method == "GET":
-        return _render_draft(task)
-    try:
-        _strict_form(DRAFT_FIELDS | {"revision", "comment"}, upload=True)
-        task = update_draft(task=task, actor=current_user,
-            expected_revision=request.form.get("revision"), comment=request.form.get("comment"), prepared_files=_prepare_uploads(), **_draft_payload())
-        _commit_task_action()
-    except PermissionError:
-        db.session.rollback()
-        abort(403)
-    except (WorkflowError, UploadError) as error:
-        db.session.rollback()
-        task = get_visible_task_or_404(task_id, current_user)
-        return _render_draft(task, error), 409 if isinstance(error, WorkflowConflict) else 400
-    except (SQLAlchemyError, OSError):
-        db.session.rollback()
-        task = get_visible_task_or_404(task_id, current_user)
-        return _render_draft(task, WorkflowError("Не удалось сохранить изменения. Повторите попытку")), 500
-    flash("Изменения черновика сохранены", "success")
-    return redirect(url_for("tasks.task_detail", task_id=task.id))
+    get_visible_task_or_404(task_id, current_user)
+    abort(410, description="Редактирование отправленного поручения недоступно")

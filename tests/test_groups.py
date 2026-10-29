@@ -31,11 +31,12 @@ class HistoricalGroupTests(PortalCase):
             self.assertEqual([self.ids["employee"]], [u.id for u in group.students])
             self.assertEqual(1, Group.query.count())
 
-    def test_legacy_teacher_and_member_cannot_be_deleted_with_cascades(self):
+    def test_legacy_teacher_and_member_are_soft_disabled_without_cascades(self):
         self.login()
         for name in ("head", "employee"):
-            response = self.client.post(f'/admin/users/{self.ids[name]}/delete', follow_redirects=True)
-            self.assertIn("историческими данными групп".encode(), response.data)
+            response = self.client.post(f'/admin/users/{self.ids[name]}/delete')
+            self.assertEqual(302, response.status_code)
+            with self.app.app_context(): self.assertTrue(db.session.get(User,self.ids[name]).is_blocked)
         with self.app.app_context():
             group = db.session.get(Group, self.group_id)
             self.assertEqual(self.ids["head"], group.teacher_id)

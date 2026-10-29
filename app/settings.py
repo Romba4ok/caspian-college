@@ -1,4 +1,4 @@
-"""Category directory and one validated source of upload policy."""
+"""Preserved category directory and fixed policy for all new uploads."""
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -49,10 +49,8 @@ def validate_upload_policy(max_upload_mb, allowed_extensions):
 
 
 def get_upload_policy():
-    row = db.session.get(SystemSettings, 1, populate_existing=True)
-    if row is None:
-        return UploadPolicy()
-    return validate_upload_policy(row.max_upload_mb, row.allowed_extensions)
+    """R32: saved legacy settings never change the effective 20 MB / six formats."""
+    return UploadPolicy()
 
 
 def _lock_admin(actor):

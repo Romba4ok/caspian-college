@@ -48,7 +48,8 @@ class PortalCase(unittest.TestCase):
     def task(self, **changes):
         values = dict(title="Сохранить задачу", description="Исторический текст", author_id=self.ids["employee"],
             sender_department_id=self.department_id, recipient_department_id=self.other_department_id,
-            due_at=datetime(2030, 1, 1, tzinfo=timezone.utc), status="draft")
+            due_at=datetime(2030, 1, 1, tzinfo=timezone.utc), status="new",
+            sent_at=datetime(2029, 12, 1, tzinfo=timezone.utc))
         with self.app.app_context():
             task = Task(**(values | changes))
             db.session.add(task)
@@ -60,6 +61,15 @@ class PortalCase(unittest.TestCase):
             recipient_department_id=str(self.other_department_id), due_at="2030-06-01T12:00",
             priority="normal", category_id="", contact_person="") | changes
 
+    def creation_form(self, *, client=None, **changes):
+        """Issue an author-bound key through the actual new-task GET form."""
+        import re
+        response = (client or self.client).get("/tasks/new")
+        self.assertEqual(200, response.status_code)
+        match = re.search(r'name="creation_key" value="([0-9a-f]{64})"', response.get_data(as_text=True))
+        self.assertIsNotNone(match)
+        return self.draft_form(**({"creation_key": match.group(1)} | changes))
+
     def add_member(self, username, *, role="employee", department_id=None, blocked=False):
         with self.app.app_context():
             user = User(full_name=username, username=username, role=role,
@@ -70,7 +80,7 @@ class PortalCase(unittest.TestCase):
             self.ids[username] = user.id
             return user.id
 
-    def task_batch(self, count, *, statuses=("draft",), **changes):
+    def task_batch(self, count, *, statuses=("new",), **changes):
         """Create many synthetic cards in one transaction, never in the portal DB."""
         with self.app.app_context():
             rows = []
@@ -80,7 +90,7 @@ class PortalCase(unittest.TestCase):
                     author_id=self.ids["employee"], sender_department_id=self.department_id,
                     recipient_department_id=self.other_department_id,
                     due_at=datetime(2030, 1, 1, tzinfo=timezone.utc), status=status,
-                    sent_at=None if status in ("draft", "pending_approval") else datetime(2029, 12, 1, tzinfo=timezone.utc))
+                    sent_at=datetime(2029, 12, 1, tzinfo=timezone.utc))
                 rows.append(Task(**(values | changes)))
             db.session.add_all(rows)
             db.session.flush()

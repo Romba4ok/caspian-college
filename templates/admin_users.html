@@ -12,18 +12,15 @@
         <td data-label="{{ t('Логин') }}">{{ user['username'] }}</td>
         <td data-label="{{ t('Роль') }}">{{ t(roles[user['role']]) }}</td>
         <td data-label="{{ t('Отдел') }}">{{ t(user.department.name) if user.department else '—' }}</td>
-        <td data-label="{{ t('Статус') }}">{{ t('Заблокирована') if user['is_blocked'] else t('Активна') }}</td>
+        <td data-label="{{ t('Статус') }}">{{ 'Отключена' if user['is_blocked'] else 'Активна' }}</td>
         <td class="actions">
           <a href="{{ url_for('admin.admin_user_edit', user_id=user['id']) }}">{{ t('Изменить') }}</a>
           {% if user['role'] != 'admin' %}
             <form method="post" action="{{ url_for('admin.admin_user_unblock' if user['is_blocked'] else 'admin.admin_user_block', user_id=user['id']) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="link-button">{{ t('Разблокировать') if user['is_blocked'] else t('Заблокировать') }}</button>
+              <button class="link-button">{{ 'Восстановить доступ' if user['is_blocked'] else 'Отключить' }}</button>
             </form>
-            <form method="post" action="{{ url_for('admin.admin_user_delete', user_id=user['id']) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="danger link-button">{{ t('Удалить') }}</button>
-            </form>
+
           {% endif %}
         </td>
       </tr>
