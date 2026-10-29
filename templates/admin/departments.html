@@ -1,40 +1,32 @@
 {% extends 'base.html' %}
-{% block title %}Отделы · Платформа отделов{% endblock %}
+{% import 'components/ui.html' as ui %}
+{% from 'components/icons.html' import icon %}
+{% block title %}Отделы · Caspian College{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>Отделы</h1><p>Управляйте отделами и сохраняйте историю работы при архивировании.</p></div><a class="button" href="{{ url_for('admin.admin_department_new') }}">Добавить отдел</a></div>
-<section class="card table-wrap users-table" aria-label="Действующие и архивные отделы">
-  <table>
-    <thead><tr><th>Название</th><th>Статус</th><th>Пользователи</th><th>Задачи</th><th>Действия</th></tr></thead>
-    <tbody>
-      {% for department in departments %}
-      {% set members = member_counts.get(department.id, 0) %}
-      {% set tasks = task_counts.get(department.id, 0) %}
-      <tr>
-        <td data-label="Название">{{ department.name }}</td>
-        <td data-label="Статус">{{ 'Архив' if department.is_archived else 'Действующий' }}</td>
-        <td data-label="Пользователи">{{ members }}</td>
-        <td data-label="Задачи">{{ tasks }}</td>
-        <td class="actions">
-          <a href="{{ url_for('admin.admin_department_edit', department_id=department.id) }}">Изменить</a>
-          <form method="post" action="{{ url_for('admin.admin_department_restore' if department.is_archived else 'admin.admin_department_archive', department_id=department.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="link-button">{{ 'Восстановить' if department.is_archived else 'Архивировать' }}</button>
-          </form>
-          {% if not members and not tasks %}
-          <details>
-            <summary>Удалить</summary>
-            <p>Удалить пустой отдел «{{ department.name }}»?</p>
-            <form method="post" action="{{ url_for('admin.admin_department_delete', department_id=department.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="danger link-button">Подтвердить удаление</button>
-            </form>
-          </details>
-          {% endif %}
-        </td>
-      </tr>
-      {% else %}<tr><td colspan="5">Отделов пока нет.</td></tr>{% endfor %}
-    </tbody>
-  </table>
-</section>
-<p class="hint">Удалить можно только отдел без пользователей и задач, включая черновики и закрытые поручения. Архивирование сохраняет участников, задачи и историю.</p>
+<div class="people-workspace departments-workspace">
+<div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Отделы</h1><p>Структура колледжа и история совместной работы</p></div>{{ ui.link_button('Добавить отдел',url_for('admin.admin_department_new'),variant='primary',symbol='plus') }}</div>
+{% if department_notice|default('') %}{{ ui.message(department_notice) }}{% endif %}
+{% if department_error|default('') %}<div class="error-summary" data-error-summary role="alert" tabindex="-1"><h2>Изменения не выполнены</h2><p>{{ department_error }}</p></div>{% endif %}
+{% set archived=departments|selectattr('is_archived')|list|length %}
+<dl class="people-metrics"><div><dt>Всего отделов</dt><dd>{{ departments|length }}</dd></div><div><dt>Действующие</dt><dd>{{ departments|length-archived }}</dd></div><div><dt>В архиве</dt><dd>{{ archived }}</dd></div></dl>
+<section class="card people-directory"><div class="people-directory-heading"><h2>Структура колледжа</h2><span class="hint">Отделы: {{ departments|length }}</span></div>
+{% if departments %}<table class="people-table department-table"><caption class="sr-only">Действующие и архивные отделы</caption><thead><tr><th scope="col">Название</th><th scope="col">Статус</th><th scope="col">Пользователи</th><th scope="col">Задачи</th><th scope="col">Действия</th></tr></thead><tbody>
+{% for department in departments %}
+{% set members=member_counts.get(department.id,0) %}{% set tasks=task_counts.get(department.id,0) %}
+<tr data-department-id="{{ department.id }}" class="{{ 'department-archived' if department.is_archived else '' }}">
+<td data-label="Название"><div class="department-identity"><span class="department-symbol">{{ icon('building',20) }}</span><div><strong>{{ department.name }}</strong><small>{{ 'Существующие задачи и история доступны' if department.is_archived else 'Доступен для новых поручений' }}</small></div></div></td>
+<td data-label="Статус"><span class="badge {{ 'account-disabled' if department.is_archived else 'account-enabled' }}">{{ icon('history' if department.is_archived else 'check',14) }}{{ 'В архиве' if department.is_archived else 'Действующий' }}</span></td>
+<td data-label="Пользователи">{{ members }}</td><td data-label="Задачи">{{ tasks }}</td>
+<td data-label="Действия"><div class="person-actions department-actions">
+<a class="button secondary-button" href="{{ url_for('admin.admin_department_edit',department_id=department.id) }}">Переименовать<span class="sr-only">: {{ department.name }}</span></a>
+<form method="post" data-ui-form data-confirm-title="{{ 'Восстановить отдел?' if department.is_archived else 'Архивировать отдел?' }}" data-confirm-label="{{ 'Восстановить отдел' if department.is_archived else 'Архивировать отдел' }}" data-confirm-message="«{{ department.name }}». {{ 'Отдел вернётся в действующие и снова будет доступен для новых поручений.' if department.is_archived else 'Отдел будет недоступен для новых поручений. Пользователи, задачи и история сохранятся; работа с существующими задачами продолжится.' }}" action="{{ url_for('admin.admin_department_restore' if department.is_archived else 'admin.admin_department_archive',department_id=department.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="button secondary-button" data-submit-button data-busy-label="Сохраняем…"><span data-button-label>{{ 'Восстановить' if department.is_archived else 'В архив' }}</span><span class="sr-only">: {{ department.name }}</span></button></form>
+{% if not members and not tasks %}
+<details class="department-delete" data-delete-fallback><summary>Удалить<span class="sr-only"> отдел {{ department.name }}</span></summary><p>Удалить пустой отдел «{{ department.name }}»? Восстановить его после удаления нельзя.</p>
+<form method="post" data-ui-form data-confirm-title="Удалить пустой отдел?" data-confirm-label="Удалить отдел" data-confirm-message="«{{ department.name }}» будет удалён без возможности восстановления. Удалить можно только отдел без пользователей и задач, включая завершённые. Если появились связанные данные, операция будет отклонена." action="{{ url_for('admin.admin_department_delete',department_id=department.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="button secondary-button account-disable" data-submit-button data-busy-label="Удаляем…"><span data-button-label>Подтвердить удаление</span><span class="sr-only">: {{ department.name }}</span></button></form></details>
+{% else %}<span class="hint department-linked">Удаление недоступно: есть пользователи или задачи.</span>{% endif %}
+</div></td></tr>{% endfor %}</tbody></table>
+{% else %}{{ ui.empty_state('Отделов пока нет','Добавьте первый отдел, чтобы определить структуру колледжа.') }}{% endif %}</section>
+<section class="department-guidance"><div>{{ icon('history',20) }}<h2>Архив сохраняет историю</h2><p>Отдел можно восстановить. Пользователи и поручения остаются в платформе.</p></div><div>{{ icon('info',20) }}<h2>Удаляется только пустой отдел</h2><p>Наличие пользователей или любых задач, включая завершённые, исключает удаление. Используйте архивирование.</p></div></section>
+{{ ui.account_confirmation() }}</div>
 {% endblock %}

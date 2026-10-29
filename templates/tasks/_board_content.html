@@ -1,40 +1,17 @@
-{% from 'tasks/_assignees.html' import names as assignee_names %}
+{% import 'components/ui.html' as ui %}
+{% from 'components/icons.html' import icon %}
 <div data-board-root data-csrf-token="{{ csrf_token() }}" data-user-id="{{ current_user.id }}" data-refresh-url="{{ url_for(list_endpoints[direction],view='board',fragment='board',scope=completed_scope) }}" data-direction="{{ direction }}" data-total="{{ pagination.total }}" data-counts="{{ counts|tojson|forceescape }}">
   <div class="task-board{% if direction == 'completed' %} task-board-closed{% endif %}" role="region" aria-label="Доска задач" aria-describedby="board-help" tabindex="-1">
     {% for group in board_groups %}
     <section class="board-column" data-group="{{ group.key }}" data-statuses="{{ group.statuses|tojson|forceescape }}" aria-labelledby="column-{{ group.key }}">
-      <div class="board-column-heading">
-        <h3 id="column-{{ group.key }}">{{ group.label }}</h3>
-        <span class="board-column-count" aria-label="Всего задач: {{ group.count }}">{{ group.count }}</span>
-      </div>
+      <div class="board-column-heading"><h3 id="column-{{ group.key }}">{{ icon('file' if group.key == 'new' else ('clock' if group.key == 'in_progress' else ('check' if group.key == 'completed' else ('history' if group.key == 'cancelled' else 'alert'))),23) }}{{ group.label }}</h3><span class="board-column-count" aria-label="Всего задач: {{ group.count }}">{{ group.count }}</span></div>
       <div class="board-cards">
       {% for task in group.tasks %}
-        {% set clock = deadline_states[task.id] %}
-        {% set card = board_data[task.id] %}
-        <article class="board-card{% if clock.overdue %} task-card-overdue{% endif %}" data-task-id="{{ task.id }}" data-board-task="{{ card|tojson|forceescape }}">
-          <div class="board-card-meta"><span class="task-status status-{{ task.status }}">{{ status_labels[task.status] }}</span></div>
-          {% if direction == 'completed' %}{% set progress = task|task_progress %}<p class="task-relationship">{{ progress.relationship }}</p><p class="task-stage board-stage">{{ progress.stage }}</p><p class="hint">{{ 'Завершена' if task.status == 'completed' else ('Отменена' if task.status == 'cancelled' else 'Отклонена') }}: {{ task.completed_at|task_datetime if task.status == 'completed' and task.completed_at else (task.closed_at|task_datetime if task.status != 'completed' and task.closed_at else 'дата и время неизвестны (историческая запись)') }}</p>{% endif %}
-          {% if task.is_rework %}<p class="task-rework"><strong>На доработке</strong></p>{% endif %}
-          <h4><a href="{{ url_for('tasks.task_detail',task_id=task.id) }}">{{ task.title }}</a></h4>
-          <p class="board-priority priority-{{ task.priority }}"><span aria-hidden="true"></span>{{ priority_labels[task.priority] }} приоритет</p>
-          <p class="board-department">{% if current_user.role == 'admin' or direction == 'completed' %}{{ task.sender_department.name }} → {{ task.recipient_department.name }}{% else %}{{ 'Поручение от:' if direction == 'received' else 'Поручение для:' }} {{ task.sender_department.name if direction == 'received' else task.recipient_department.name }}{% endif %}</p>
-          <p class="board-assignee"><span>Исполнители ({{ task.assignee_ids|length }}):</span> {{ assignee_names(task) }}</p>{% if card.unavailable_assignee %}<p class="hint">Нет доступных исполнителей — можно присоединиться или назначить состав.</p>{% endif %}
-          <div class="board-deadline">Срок: <time{% if task.due_at %} datetime="{{ task.due_at.isoformat() }}"{% endif %}>{{ task.due_at|task_datetime if task.due_at else 'неизвестен' }}</time><span class="task-clock{% if clock.overdue %} task-overdue{% endif %}">{{ clock.text }}</span></div>
-          {% if attention[task.id] %}<p class="board-attention">{{ attention[task.id] }}</p>{% endif %}
-          <p class="hint">Создана: {{ task.created_at|task_datetime }}</p>
-          <div class="board-card-actions">
-            <div class="board-card-counts">
-              <span role="img" aria-label="Комментариев: {{ card.comment_count }}" title="Комментарии"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg><span aria-hidden="true">{{ card.comment_count }}</span></span>
-              <span role="img" aria-label="Вложений: {{ card.attachment_count }}" title="Вложения"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8L15 6"/></svg><span aria-hidden="true">{{ card.attachment_count }}</span></span>
-            </div>
-            {% if card.actions %}<a class="button secondary-button" data-board-action href="{{ url_for('tasks.task_detail',task_id=task.id) }}">Действия<span class="sr-only"> с задачей «{{ task.title }}»</span></a>{% endif %}
-          </div>
-          <span class="sr-only" data-drag-hint hidden>Можно перетащить в разрешённую колонку</span>
-        </article>
-      {% else %}<p class="board-empty">Задач на этом этапе нет.</p>{% endfor %}
+        {{ ui.task_summary(task, deadline_states[task.id], board_data[task.id], direction, current_user, attention.get(task.id)) }}
+      {% else %}<div class="board-empty">{{ icon('empty',26) }}<p>Задач в этом статусе нет</p></div>{% endfor %}
       </div>
     </section>
     {% endfor %}
   </div>
-  {% if not tasks %}<p class="task-notice">{% if direction == 'completed' %}Закрытых задач в выбранном направлении пока нет.{% else %}Задач пока нет. Новые поручения появятся здесь после отправки отделу.{% endif %}</p>{% endif %}
+  {% if not tasks %}<p class="task-notice">{{ 'Закрытых задач в выбранном направлении пока нет.' if direction == 'completed' else 'Задач пока нет. Новые поручения появятся здесь после отправки отделу.' }}</p>{% endif %}
 </div>

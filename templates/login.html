@@ -1,13 +1,37 @@
 {% extends 'base.html' %}
-{% block title %}{{ t('Вход · Платформа отделов') }}{% endblock %}
+{% from 'components/icons.html' import icon %}
+{% from 'components/forms.html' import field, submit_button %}
+{% block title %}Вход · Платформа отделов{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block main_class %}login-workspace{% endblock %}
+{% block flash_messages %}{% endblock %}
 {% block content %}
-<section class="card login-card">
-  <h1>{{ t('Вход') }}</h1>
-  <form method="post" class="form-stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>{{ t('Логин') }}<input name="username" maxlength="80" autocomplete="username" required></label>
-    <label>{{ t('Пароль') }}<input name="password" type="password" autocomplete="current-password" required></label>
-    <button>{{ t('Войти') }}</button>
-  </form>
-</section>
+<div class="login-layout">
+  <section class="login-intro" aria-labelledby="login-intro-title">
+    <span class="eyebrow">CASPIAN COLLEGE</span>
+    <h1 id="login-intro-title">Работа отделов —<br><span>в одном пространстве.</span></h1>
+    <p class="login-description">Поручения, документы и результаты.<br>Всё, что нужно для совместной работы.</p>
+    <ul class="login-features">
+      <li><span class="feature-icon">{{ icon('tasks') }}</span><span><strong>Задачи между отделами</strong><small>Понятные поручения и сроки</small></span></li>
+      <li><span class="feature-icon">{{ icon('file') }}</span><span><strong>Комментарии и файлы</strong><small>Материалы рядом с задачей</small></span></li>
+      <li><span class="feature-icon">{{ icon('check') }}</span><span><strong>Прозрачный ход работы</strong><small>От новой задачи до результата</small></span></li>
+    </ul>
+  </section>
+  <section class="card login-card" aria-labelledby="login-title">
+    <span class="login-lock">{{ icon('lock', 24) }}</span>
+    <h2 id="login-title">Вход в платформу</h2>
+    <p class="login-help">Используйте учётную запись колледжа.</p>
+    {% if integrated_preview_mode|default(false) %}<p class="hint">Тестовый вход: demo.head, demo.employee или demo.admin.<br>Пароль стенда: Caspian-demo-2026!</p>{% endif %}
+    {% set errors = form_errors|default({}) %}
+    {% set authentication_error = get_flashed_messages(category_filter=['error'])|join(' ') %}
+    <form method="post" class="form-stack" data-ui-form data-inline-errors-only>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {{ field('username', 'Логин', value=login_value|default(request.form.get('username','')), required=true, autocomplete='username', maxlength=80, error=errors.get('username',''),leading_icon='user',placeholder='Введите логин') }}
+      {{ field('password', 'Пароль', input_type='password', required=true, autocomplete='current-password', error=errors.get('password',authentication_error),leading_icon='lock',placeholder='Введите пароль',reveal=true) }}
+      {{ submit_button('Войти', 'Входим…') }}
+      <p class="form-pending sr-only" role="status" aria-live="polite" data-form-pending></p>
+    </form>
+    <p class="login-support">{{ icon('info', 15) }}Нет доступа? Обратитесь к начальнику своего отдела.</p>
+  </section>
+</div>
 {% endblock %}

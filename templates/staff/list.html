@@ -1,15 +1,12 @@
 {% extends 'base.html' %}
+{% import 'components/ui.html' as ui with context %}
 {% block title %}Сотрудники · Caspian College{% endblock %}
 {% block content %}
-<div class="page-heading"><div><h1>Сотрудники</h1><p>Отдел: {{ department.name }}</p></div>{% if may_create %}<a class="button" href="{{ url_for('staff.staff_new') }}">Добавить сотрудника</a>{% endif %}</div>
-{% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
-{% if department.is_archived %}<p class="hint">Отдел в архиве. Можно управлять существующими сотрудниками; добавление новых недоступно.</p>{% endif %}
-<section class="card table-wrap"><table><thead><tr><th>Имя</th><th>Логин</th><th>Доступ</th><th>Активные задачи</th><th>Действия</th></tr></thead><tbody>
-{% for employee in employees %}<tr>
-  <td>{{ employee.full_name }}</td><td>{{ employee.username }}</td><td>{{ 'Отключён' if employee.is_blocked else 'Активен' }}</td><td>{{ active_assignments.get(employee.id, 0) }}</td>
-  <td class="actions"><a href="{{ url_for('staff.staff_edit', user_id=employee.id) }}">Изменить</a>
-  {% if not employee.is_blocked %}<form method="post" action="{{ url_for('staff.staff_disable', user_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button">Отключить</button></form>{% else %}<span class="hint">Доступ восстанавливает администратор</span>{% endif %}</td>
-</tr>{% else %}<tr><td colspan="5">Сотрудников пока нет.</td></tr>{% endfor %}
-</tbody></table></section>
-<p class="hint">Перед отключением переназначьте активные задачи. Учётная запись, авторство и история сохраняются.</p>
+<div class="people-workspace">
+<div class="people-heading"><div><span class="eyebrow">КОМАНДА ОТДЕЛА</span><h1>Сотрудники</h1><p>{{ department.name }}</p></div>{% if may_create %}{{ ui.link_button('Добавить сотрудника',url_for('staff.staff_new'),variant='primary',symbol='plus') }}{% endif %}</div>
+{% if error %}<div class="error-summary" data-error-summary role="alert" tabindex="-1"><h2>Не удалось изменить доступ</h2><p>{{ error }}</p><p>Учётная запись и история сохранены. Переназначение выполняется отдельно в задачах.</p></div>{% endif %}
+{% if department.is_archived %}{{ ui.message('Отдел в архиве. Можно изменять существующие учётные записи; добавление сотрудников недоступно.') }}{% endif %}
+{% if account_notice|default('') %}{{ ui.message(account_notice) }}{% endif %}
+{{ ui.people_table(employees,staff=true,active_assignments=active_assignments) }}
+{{ ui.account_confirmation() }}</div>
 {% endblock %}

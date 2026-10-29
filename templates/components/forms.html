@@ -1,0 +1,58 @@
+{% from 'components/icons.html' import icon %}
+{% macro error_summary(errors, general='', prefix='field-') -%}
+<div class="error-summary" data-error-summary role="alert" tabindex="-1" aria-labelledby="form-error-title"{% if not errors and not general %} hidden{% endif %}>
+<h3 id="form-error-title">Проверьте заполнение формы</h3><ul>{% if general %}<li>{{ general }}</li>{% endif %}{% for name, text in errors.items() %}<li><a href="#{{ prefix }}{{ name }}">{{ text }}</a></li>{% endfor %}</ul>
+</div>
+{%- endmacro %}
+{% macro field(name, label, input_type='text', value='', required=false, autocomplete='', hint='', error='', maxlength=none, leading_icon='', placeholder='', reveal=false, identifier=none) -%}
+{% set field_id = identifier or 'field-' ~ name %}
+<div class="field" data-field>
+<label for="{{ field_id }}">{{ label }}{% if required %}<span class="required" aria-hidden="true"> *</span><span class="sr-only"> (обязательно)</span>{% endif %}</label>
+{% if leading_icon or reveal %}<div class="field-input">{% if leading_icon %}<span class="field-leading" aria-hidden="true">{{ icon(leading_icon,20) }}</span>{% endif %}{% endif %}
+<input id="{{ field_id }}" name="{{ name }}" type="{{ input_type }}" value="{{ value if input_type != 'password' else '' }}"{% if placeholder %} placeholder="{{ placeholder }}"{% endif %}{% if required %} required{% endif %}{% if autocomplete %} autocomplete="{{ autocomplete }}"{% endif %}{% if maxlength %} maxlength="{{ maxlength }}"{% endif %}{% if error %} aria-invalid="true"{% endif %}{% if hint or error %} aria-describedby="{{ (field_id ~ '-hint') if hint and not error else '' }}{{ '' }}{{ (field_id ~ '-error') if error else '' }}"{% endif %} data-field-label="{{ label }}">
+{% if reveal %}<button type="button" class="password-visibility" data-password-toggle aria-controls="{{ field_id }}" aria-label="Показать пароль" aria-pressed="false" hidden><span data-password-show-icon>{{ icon('eye',20) }}</span><span data-password-hide-icon hidden>{{ icon('eye-off',20) }}</span></button>{% elif leading_icon %}<span class="field-status-icon" aria-hidden="true">{{ icon('alert',20) }}</span>{% endif %}
+{% if leading_icon or reveal %}</div>{% endif %}
+{% if hint %}<p class="hint" id="{{ field_id }}-hint">{{ hint }}</p>{% endif %}
+<p class="field-error" id="{{ field_id }}-error"{% if not error %} hidden{% endif %}>{{ error }}</p>
+</div>
+{%- endmacro %}
+{% macro submit_button(label, busy_label='Отправляем…', symbol='arrow') -%}
+<button type="submit" class="button" data-submit-button data-busy-label="{{ busy_label }}"><span data-button-label>{{ label }}</span>{{ icon(symbol, 18) }}</button>
+{%- endmacro %}
+{% macro select_field(name,label,options,value='',required=false,placeholder=none,hint='',error='',value_attr='id',label_attr='name', identifier=none) -%}
+{% set field_id = identifier or 'field-' ~ name %}
+<div class="field" data-field><label for="{{ field_id }}">{{ label }}{% if required %}<span class="required" aria-hidden="true"> *</span><span class="sr-only"> (обязательно)</span>{% endif %}</label>
+<select id="{{ field_id }}" name="{{ name }}" data-field-label="{{ label }}"{% if required %} required{% endif %}{% if error %} aria-invalid="true"{% endif %}{% if hint or error %} aria-describedby="{{ field_id ~ '-hint' if hint and not error else '' }}{{ '' }}{{ field_id ~ '-error' if error else '' }}"{% endif %}>
+{% if placeholder is not none %}<option value="">{{ placeholder }}</option>{% endif %}
+{% for option in options %}<option value="{{ option[value_attr] }}"{% if value|string == option[value_attr]|string %} selected{% endif %}>{{ option[label_attr] }}</option>{% endfor %}</select>
+{% if hint %}<p class="hint" id="{{ field_id }}-hint">{{ hint }}</p>{% endif %}<p class="field-error" id="{{ field_id }}-error"{% if not error %} hidden{% endif %}>{{ error }}</p></div>
+{%- endmacro %}
+{% macro textarea_field(name,label,value='',required=false,hint='',error='', identifier=none) -%}
+{% set field_id = identifier or 'field-' ~ name %}
+<div class="field" data-field><label for="{{ field_id }}">{{ label }}{% if required %}<span class="required" aria-hidden="true"> *</span><span class="sr-only"> (обязательно)</span>{% endif %}</label>
+<textarea id="{{ field_id }}" name="{{ name }}" rows="4" data-field-label="{{ label }}"{% if required %} required{% endif %}{% if error %} aria-invalid="true"{% endif %}{% if hint or error %} aria-describedby="{{ field_id ~ '-hint' if hint and not error else '' }}{{ '' }}{{ field_id ~ '-error' if error else '' }}"{% endif %}>{{ value }}</textarea>
+{% if hint %}<p class="hint" id="{{ field_id }}-hint">{{ hint }}</p>{% endif %}<p class="field-error" id="{{ field_id }}-error"{% if not error %} hidden{% endif %}>{{ error }}</p></div>
+{%- endmacro %}
+{% macro account_fields(person,errors,staff=false,roles=none,departments=none) -%}
+<div class="account-fields">
+{{ field('full_name','Полное имя',value=request.form.get('full_name',person.full_name if person else ''),required=true,autocomplete='name',error=errors.get('full_name',''),maxlength=160) }}
+{{ field('username','Логин',value=request.form.get('username',person.username if person else ''),required=true,autocomplete='off',hint='Уникальный логин для входа в платформу.',error=errors.get('username',''),maxlength=80) }}
+{% if not staff %}{% if person and person.role=='admin' %}
+<div class="field account-fixed-role"><span>Роль</span><strong>Администратор</strong><p class="hint">Единственная административная учётная запись.</p><input type="hidden" name="role" value="admin"><input type="hidden" name="department_id" value=""></div>
+{% else %}
+{% set role_choices=[] %}{% for key,label in roles.items() %}{% set _=role_choices.append({'id':key,'name':label}) %}{% endfor %}
+{{ select_field('role','Роль',role_choices,value=request.form.get('role',person.role if person else 'employee'),required=true,error=errors.get('role','')) }}
+{% set department_choices=[] %}{% for item in departments %}{% set _=department_choices.append({'id':item.id,'name':item.name ~ (' (архив)' if item.is_archived else '')}) %}{% endfor %}
+{{ select_field('department_id','Отдел',department_choices,value=request.form.get('department_id',person.department_id if person else ''),required=true,placeholder='Выберите отдел',error=errors.get('department_id','')) }}
+{% endif %}{% endif %}
+{{ field('password','Новый пароль' if person else 'Пароль',input_type='password',required=not person,autocomplete='new-password',hint='Оставьте пустым, чтобы сохранить текущий пароль.' if person else 'Передайте пароль пользователю по согласованному каналу.',error=errors.get('password','')) }}
+</div>
+{%- endmacro %}
+
+{% macro file_field(name,label,policy,error='', identifier=none) -%}
+{% set field_id = identifier or 'field-' ~ name %}
+<div class="field create-upload" data-field><label for="{{ field_id }}">{{ label }} <span class="hint">Необязательно</span></label>
+<input id="{{ field_id }}" name="{{ name }}" type="file" multiple accept=".{{ policy.allowed_extensions|join(',.') }}" data-field-label="{{ label }}" data-file-policy data-extensions="{{ policy.allowed_extensions|join(',') }}" data-max-mb="{{ policy.max_upload_mb }}" aria-describedby="{{ field_id }}-{{ 'error' if error else 'hint' }}"{% if error %} aria-invalid="true"{% endif %}>
+<p class="hint" id="{{ field_id }}-hint">{{ policy.allowed_extensions|join(', ')|upper }} · до {{ policy.max_upload_mb }} МБ на файл; весь запрос — до 21 МБ. После ошибки файлы нужно выбрать повторно.</p>
+<ul class="create-selected-files" data-selected-files aria-live="polite"></ul><p class="field-error" id="{{ field_id }}-error"{% if not error %} hidden{% endif %}>{{ error }}</p></div>
+{%- endmacro %}

@@ -1,16 +1,18 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Изменить отдел' if department else 'Новый отдел' }} · Платформа отделов{% endblock %}
+{% import 'components/forms.html' as forms %}
+{% import 'components/ui.html' as ui %}
+{% set editing=department is not none %}
+{% set errors=form_errors|default({'name':error} if error else {}) %}
+{% block title %}{{ 'Переименовать отдел' if editing else 'Новый отдел' }} · Caspian College{% endblock %}
 {% block content %}
-<section class="card form-card">
-  <h1>{{ 'Изменить отдел' if department else 'Новый отдел' }}</h1>
-  {% if department and department.is_archived %}<p class="hint">Этот отдел в архиве. Переименование не восстанавливает его автоматически.</p>{% endif %}
-  <form method="post" class="form-stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label for="department-name">Название отдела</label>
-    <input id="department-name" name="name" maxlength="100" required value="{{ request.form.get('name', department.name if department else '') }}" aria-describedby="department-name-hint{% if error %} department-name-error{% endif %}"{% if error %} aria-invalid="true"{% endif %}>
-    <p class="hint" id="department-name-hint">От 1 до 100 символов. Регистр и пробелы по краям не создают новое название.</p>
-    {% if error %}<p class="message error" id="department-name-error" role="alert">{{ error }}</p>{% endif %}
-    <div class="actions"><button>Сохранить</button><a href="{{ url_for('admin.admin_departments') }}">Отмена</a></div>
-  </form>
-</section>
+<div class="people-workspace departments-workspace"><a class="people-back" data-department-cancel href="{{ url_for('admin.admin_departments') }}">← К отделам</a>
+<div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>{{ 'Переименовать отдел' if editing else 'Новый отдел' }}</h1><p>{{ department.name if editing else 'Добавьте отдел в структуру колледжа' }}</p></div></div>
+<div class="account-layout"><section class="card account-form-card"><h2>Название отдела</h2>
+{% if editing and department.is_archived %}{{ ui.message('Отдел в архиве. Переименование сохраняет архивный статус; восстановление выполняется отдельно.') }}{% endif %}
+<form method="post" data-ui-form data-department-form data-account-unsaved="{{ 'true' if request.method=='POST' else 'false' }}" action="{{ url_for('admin.admin_department_edit',department_id=department.id) if editing else url_for('admin.admin_department_new') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{{ forms.error_summary(errors,error if error and not errors else '') }}
+<div class="account-fields department-fields">{{ forms.field('name','Название отдела',value=request.form.get('name',department.name if editing else ''),required=true,maxlength=100,hint='От 1 до 100 символов. Регистр и пробелы по краям не создают новое название.',error=errors.get('name','')) }}</div>
+<div class="account-form-actions">{{ forms.submit_button('Сохранить название' if editing else 'Добавить отдел','Сохраняем…') }}<a class="button secondary-button" data-department-cancel href="{{ url_for('admin.admin_departments') }}">Отмена</a></div><p class="sr-only" data-form-pending role="status" aria-live="polite"></p>
+</form></section><aside class="card account-explanation"><span class="eyebrow">СТРУКТУРА КОЛЛЕДЖА</span><h2>{{ 'Меняется только название' if editing else 'Действующий отдел' }}</h2><p>{{ 'Пользователи, задачи и история останутся связаны с этим отделом. Переименование не меняет доступ учётных записей.' if editing else 'Новый отдел будет доступен для поручений. Пользователи назначаются в него отдельно в разделе «Пользователи».' }}</p><p>Архивирование сохраняет данные. Удалить можно только отдел без пользователей и задач.</p></aside></div>{{ ui.account_confirmation() }}</div>
 {% endblock %}

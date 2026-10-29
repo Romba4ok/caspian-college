@@ -1,30 +1,20 @@
 {% extends 'base.html' %}
-{% macro status_comparison(incoming, outgoing, caption) %}
-<div class="report-table-wrap"><table class="report-table">
-  <caption>{{ caption }}</caption><thead><tr><th scope="col">Статус</th><th scope="col">Входящие</th><th scope="col">Исходящие</th></tr></thead>
-  <tbody>{% for key,label in status_labels.items() %}<tr><th scope="row">{{ label }}</th><td>{{ incoming.statuses[key] }}</td><td>{{ outgoing.statuses[key] }}</td></tr>{% endfor %}</tbody>
-  <tfoot><tr><th scope="row">Всего</th><td>{{ incoming.total }}</td><td>{{ outgoing.total }}</td></tr></tfoot>
-</table></div>
-{% endmacro %}
-{% block title %}Отчёт отдела · Платформа отделов{% endblock %}
+{% import 'components/ui.html' as ui %}
+{% from 'components/icons.html' import icon %}
+{% block title %}Отчёт отдела · Caspian College{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="hint">Отчёт начальника</p><h1>{{ report.department.name }}</h1><p>Входящие — фактически поступившие поручения. Исходящие — поручения, отправленные вашим отделом.</p></div><a href="{{ url_for('tasks.received_tasks') }}">К задачам</a></div>
-{% if report.department.archived %}<p class="task-notice">Отдел в архиве. Его прежние задачи и результаты сохранены в отчёте.</p>{% endif %}
-<p class="hint">По состоянию на {{ report.generated_at|task_datetime }} · {{ config.TASK_TIMEZONE }}</p>
-<section class="report-kpis" aria-label="Показатели отдела">
-  <div class="card report-kpi"><span>Всего задач отдела</span><strong>{{ report.overall.total }}</strong></div>
-  <div class="card report-kpi"><span>Входящие / исходящие</span><strong>{{ report.incoming.total }} / {{ report.outgoing.total }}</strong></div>
-  <div class="card report-kpi"><span>Активные просроченные</span><strong>{{ report.overall.overdue }}</strong><small>Входящие: {{ report.incoming.overdue }} · Исходящие: {{ report.outgoing.overdue }}</small></div>
-</section>
-<section class="card report-section" aria-labelledby="report-statuses"><h2 id="report-statuses">Задачи по статусам</h2>{{ status_comparison(report.incoming,report.outgoing,'Количество задач своего отдела по направлениям и статусам') }}</section>
-<section class="card report-section" aria-labelledby="report-duration"><h2 id="report-duration">Среднее время выполнения</h2>
-  <p>Календарные часы от фактической отправки до последнего выполнения. Возвращённые на доработку задачи не входят в среднее до повторного выполнения. Выходные и нерабочее время входят в длительность. Отмены, отказы и незавершённые задачи не участвуют в среднем.</p>
-  <p>По отделу: <strong>{{ report.overall.average_hours|report_hours }}</strong>. Учтено завершённых: {{ report.overall.included }}. Исключено завершённых с недостоверными датами: {{ report.overall.excluded }}.</p>
-  <div class="report-duration-grid">
-    {% for label, data in [('Входящие',report.incoming),('Исходящие',report.outgoing)] %}
-    <div class="report-duration"><h3>{{ label }}</h3><p class="report-average">{{ data.average_hours|report_hours }}</p><p class="hint">Учтено завершённых: {{ data.included }}. Исключено завершённых с неизвестными датами, выполнением раньше отправки или датами из будущего: {{ data.excluded }}.</p></div>
-    {% endfor %}
-  </div>
-  {% if report.overall.total == 0 %}<p class="task-notice">Задач пока нет. Показатели обновятся после появления поручений вашего отдела.</p>{% endif %}
-</section>
+<div class="people-workspace reports-workspace" data-report-root="department">
+<div class="people-heading"><div><span class="eyebrow">ОТЧЁТ НАЧАЛЬНИКА</span><h1>Отчёт отдела</h1><p class="report-department-name">{{ report.department.name }}</p></div>{{ ui.link_button('К задачам',url_for('tasks.received_tasks'),symbol='arrow') }}</div>
+<div class="report-snapshot"><p>{{ icon('clock',16) }}По состоянию на <time datetime="{{ report.generated_at.isoformat() }}">{{ report.generated_at|task_datetime }}</time> · {{ config.get('TASK_TIMEZONE','Asia/Qyzylorda') }}</p>{% if preview_mode|default(false) %}<span class="report-demo-label">Демонстрационные показатели</span>{% endif %}</div>
+{% if report.department.archived %}{{ ui.message('Отдел в архиве. Прежние поручения и результаты сохранены в отчёте.') }}{% endif %}
+<div class="report-kpis" aria-label="Показатели отдела">
+{{ ui.report_metric('Всего задач отдела',report.overall.total,'Каждое поручение учитывается один раз') }}
+{{ ui.report_metric('Входящие / исходящие',report.incoming.total|string ~ ' / ' ~ report.outgoing.total|string,'Полученные и отправленные поручения') }}
+{{ ui.report_metric('Активные просроченные',report.overall.overdue,'Входящие: ' ~ report.incoming.overdue ~ ' · Исходящие: ' ~ report.outgoing.overdue) }}
+</div>
+{% if not report.overall.total %}{{ ui.empty_state('Задач пока нет','Показатели появятся после отправки поручений вашего отдела.') }}{% endif %}
+<div class="report-main-grid"><section class="card report-section" aria-labelledby="report-statuses"><div class="report-section-heading"><h2 id="report-statuses">Задачи по статусам</h2><p>Входящие — поступившие в отдел; исходящие — отправленные вашим отделом.</p></div>{{ ui.report_status_table(report.incoming,report.outgoing,status_labels,'Количество поручений по направлениям') }}</section>
+<section class="card report-section report-averages" aria-labelledby="report-duration"><h2 id="report-duration">Среднее время выполнения</h2><p class="report-section-description">От отправки до последнего выполнения. Только сейчас выполненные задачи.</p>{{ ui.report_average(report.overall,'По отделу','overall',report.overall.average_hours|report_hours) }}<div class="report-direction-averages">{{ ui.report_average(report.incoming,'Входящие','incoming',report.incoming.average_hours|report_hours) }}{{ ui.report_average(report.outgoing,'Исходящие','outgoing',report.outgoing.average_hours|report_hours) }}</div></section></div>
+{{ ui.report_method() }}
+</div>
 {% endblock %}

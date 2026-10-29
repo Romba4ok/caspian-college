@@ -2,10 +2,14 @@
 (() => {
   "use strict";
   const viewSwitch = document.querySelector("[data-task-view]");
-  if (!viewSwitch) return;
+  const fullMode = !!document.querySelector("[data-full-action-root]");
+  if (!viewSwitch && !fullMode) return;
   // Plain task URLs always use the server default (board); ?view=list is explicit.
   const dialog = document.querySelector("#board-dialog");
   if (!dialog || typeof dialog.showModal !== "function") return;
+  if (dialog.dataset.actionBound) return;
+  dialog.dataset.actionBound = "true";
+  if (fullMode) document.documentElement.classList.add("actions-enhanced");
   const feedback = document.querySelector("#board-feedback");
   feedback.tabIndex = -1;
   const form = document.querySelector("#board-action-form");
@@ -25,25 +29,32 @@
   let active = null, source = null, opener = null, pending = false, blocked = false;
   let pointerDrag = null, phase = "editing", fromPanel = false, savedPosition;
   let needsRead = false, revoked = false, bodyStyle = null;
-  const initialUser = document.querySelector("[data-board-root]").dataset.userId;
-  const initialDirection = viewSwitch.dataset.direction;
-  const readURL = document.querySelector("[data-board-root]").dataset.refreshUrl;
+  const rootSelector = fullMode ? "[data-full-action-root]" : "[data-board-root]";
+  const initialUser = document.querySelector(rootSelector).dataset.userId;
+  const initialDirection = viewSwitch?.dataset.direction || "detail";
+  const readURL = document.querySelector(rootSelector).dataset.refreshUrl;
+  const findCard = id => document.querySelector('[data-board-task][data-task-id="'+Number(id)+'"]');
+  const hints = JSON.parse(dialog.dataset.actionHints || "{}");
   const retryBoard = document.querySelector("#board-retry");
   const discard = document.querySelector("#board-discard");
   const say = message => { feedback.textContent = message; feedback.hidden = false; };
   function purge(message) {
     revoked = true; needsRead = true; states.clear();
-    const root = document.querySelector("[data-board-root]");
+    const root = document.querySelector(rootSelector);
     root?.replaceChildren();
     if (root) for (const name of ["data-counts","data-total","data-csrf-token","data-user-id","data-refresh-url"]) root.removeAttribute(name);
     document.querySelectorAll(".task-list-heading .hint,.task-page-heading .hint").forEach(e => { e.textContent = ""; });
     active = null; source = null; pointerDrag = null; columns = []; columnStates.clear();
     document.querySelectorAll(".task-tab-count").forEach(e => { e.textContent = "—"; e.removeAttribute("aria-label"); });
+    document.querySelectorAll(".task-list-heading,.department-context").forEach(e => e.replaceChildren());
+    if (fullMode) document.title="Задача недоступна · Caspian College";
     document.dispatchEvent(new CustomEvent("task-board:revoked"));
     form.reset(); actionSelect.replaceChildren(); assignee.replaceChildren();
+    document.dispatchEvent(new CustomEvent("ui:validate-files",{detail:{form}}));
     form.querySelector('[name="csrf_token"]').value = "";
     document.querySelector("#board-dialog-task").textContent = "Задача недоступна";
     say(message); retryBoard.hidden = true;
+    refresh.hidden=false; refresh.href=location.href; refresh.textContent="Открыть страницу заново";
   }
   document.addEventListener("task-panel:revoked", event => {
     purge(event.detail.message);
@@ -52,10 +63,28 @@
   async function readBoard() {
     const url = new URL(readURL, location.href);
     if (url.origin !== location.origin) throw new Error("Invalid origin");
-    const response = await fetch(url, {credentials:"same-origin", cache:"no-store", redirect:"manual", headers:{Accept:"text/html"}});
+    const response = await fetch(url, {credentials:"same-origin", cache:"no-store", redirect:"manual", headers:{Accept:"text/html","X-Task-Read":"1"}});
     if (response.type === "opaqueredirect" || [401,403,404].includes(response.status)) {
       purge("Доступ или сеанс изменился. Откройте страницу заново и войдите при необходимости.");
       throw new Error("Access changed");
+    }
+    if (fullMode) {
+      if (response.headers.has("X-Task-User") && response.headers.get("X-Task-User")!==initialUser) {
+        purge("Учётная запись изменилась. Откройте страницу заново."); throw new Error("Identity changed");
+      }
+      if (!response.ok || !response.headers.get("Content-Type")?.includes("text/html")) throw new Error("Invalid task response");
+      const parsed = new DOMParser().parseFromString(await response.text(),"text/html");
+      const fresh = parsed.querySelector("[data-full-action-root]");
+      if (!fresh || fresh.dataset.userId !== initialUser) {
+        purge("Учётная запись или доступ к задаче изменились. Откройте страницу заново."); throw new Error("Identity changed");
+      }
+      if (fresh.dataset.taskId !== document.querySelector(rootSelector).dataset.taskId ||
+          fresh.querySelector("script,iframe,object,embed,base,style")) throw new Error("Invalid task fragment");
+      validateNodes(fresh);
+      if (!fresh.dataset.csrfToken) throw new Error("Missing form token");
+      form.querySelector('[name="csrf_token"]').value=fresh.dataset.csrfToken;
+      document.querySelector(rootSelector).replaceWith(document.importNode(fresh,true));
+      bindBoard(); needsRead = false; retryBoard.hidden = true; return;
     }
     if (!response.ok || response.headers.get("X-Task-Board") !== initialDirection ||
         !response.headers.get("Content-Type")?.includes("text/html")) throw new Error("Invalid board response");
@@ -66,6 +95,7 @@
     const fresh = parsed.querySelector("[data-board-root]");
     if (!fresh || fresh.dataset.userId !== initialUser || fresh.dataset.direction !== initialDirection || parsed.querySelector("script,iframe,form"))
       throw new Error("Invalid board fragment");
+    validateNodes(fresh);
     const counts = JSON.parse(fresh.dataset.counts);
     if (!["received","sent","completed"].every(k => Number.isInteger(counts[k]) && counts[k] >= 0)) throw new Error("Invalid totals");
     const visibleTotal = Number(fresh.dataset.total ?? counts[initialDirection]);
@@ -82,10 +112,22 @@
     if (phase === "posted" && active) document.querySelector(`[data-task-id="${active.id}"]`)?.classList.add("board-card-updated");
     window.scrollTo(position); needsRead = false; retryBoard.hidden = true;
   }
+  function canonical(href) {
+    try { const url=new URL(href,location.href); return url.origin===location.origin && ["http:","https:"].includes(url.protocol) && !url.username && !url.password ? url : null; }
+    catch { return null; }
+  }
+  function validateNodes(root) {
+    for (const node of [root,...root.querySelectorAll("*")]) for (const attr of node.attributes) {
+      if (/^on/i.test(attr.name) || ["srcdoc","style"].includes(attr.name)) throw new Error("Unsafe markup");
+      if (["href","src","action","xlink:href"].includes(attr.name) && !canonical(attr.value)) throw new Error("Unsafe URL");
+    }
+  }
   function restoreFocus() {
-    const card = active && document.querySelector(`[data-task-id="${active.id}"]`);
+    const card = active && findCard(active.id);
     const visible = node => { const r = node?.getBoundingClientRect(); return r && r.top >= 80 && r.top < innerHeight - 44; };
-    const preferred = card?.querySelector("[data-board-action],h4 a");
+    const equivalent = card && Array.from(card.querySelectorAll("[data-board-action]"))
+      .find(node => node.dataset.boardAction===opener?.dataset.boardAction);
+    const preferred = opener?.isConnected ? opener : equivalent || card?.querySelector("[data-board-action],h4 a");
     const neighbor = active && document.querySelector(`.board-column[data-group="${active.group}"] h4 a`);
     const nearby = visible(neighbor) ? neighbor : Array.from(document.querySelectorAll("[data-board-root] h4 a")).find(visible);
     (visible(preferred) ? preferred : nearby || document.querySelector(".task-board") || feedback).focus({preventScroll:true});
@@ -95,7 +137,8 @@
     const panel = fromPanel, id = active?.id, href = active?.detail_url;
     fromPanel = false; dialog.close();
     if (bodyStyle) { document.body.style.overflow = bodyStyle.overflow; document.body.style.paddingRight = bodyStyle.padding; bodyStyle = null; }
-    form.reset(); discard.hidden = true; restoreFocus();
+    form.reset(); form.inert=false; discard.hidden = true; restoreFocus();
+    document.dispatchEvent(new CustomEvent("ui:validate-files",{detail:{form}}));
     if (panel && !revoked) document.dispatchEvent(new CustomEvent("task-board:action-closed",{detail:{id,href}}));
   }
   const states = new Map();
@@ -105,6 +148,7 @@
   };
   const chosen = () => active?.actions.find(a => a.key === actionSelect.value);
   function configure() {
+    form.querySelectorAll('[aria-invalid="true"]').forEach(node=>{node.removeAttribute("aria-invalid");node.removeAttribute("aria-describedby");});
     const action = chosen();
     submit.disabled = !action || blocked || pending;
     if (!action) {
@@ -114,6 +158,7 @@
       document.querySelector("#board-action-help").textContent = "Выберите действие, затем добавьте обязательный комментарий.";
       submit.textContent = "Подтвердить"; return;
     }
+    if (!canonical(action.url)) { blocked=true; submit.disabled=true; return; }
     form.action = action.url;
     submit.textContent = action.label;
     assignee.disabled = !action.assignee; assignee.required = action.assignee;
@@ -127,29 +172,21 @@
     deadline.disabled = !action.deadline; deadline.required = action.deadline;
     document.querySelector("#board-deadline-field").hidden = !action.deadline;
     deadline.value = active.due_at;
-    const hints = {
-      assign: "Назначение сразу переводит задачу в «В работе».",
-      claim: "Вы присоединитесь к команде, остальные исполнители сохранятся.",
-      reassign: "Меняется состав своего отдела; статус и материалы сохраняются.",
-      release: "Вы снимете только себя. После последнего участника задача станет «Новой», иначе работа продолжится.",
-      complete: "Задача сразу станет выполненной и перейдёт в «Завершённые». Отправитель сможет вернуть её на доработку.",
-      cancel: "Задача будет окончательно отменена. История сохраняется.",
-      reject: "Задача будет окончательно отклонена. Объясните причину отправителю.",
-      return: "Задача вернётся прежним доступным исполнителям в «В работе» с пометкой «На доработке».",
-      deadline: "Снять срок нельзя. Старое и новое значения сохраняются в истории."
-    };
+    const fileInput=form.querySelector('input[type=file]');
+    if (fileInput) fileInput.required=action.key==="upload";
     document.querySelector("#board-action-help").textContent = hints[action.key] || "Действие сохранится в истории вместе с вашим комментарием.";
   }
-  function open(card, target = null) {
+  function open(card, target = null, preferredKey = null, trigger = null) {
     if (pending || dialog.open || revoked) return;
     if (needsRead) { say("Сначала обновите доску, чтобы проверить результат предыдущего действия."); retryBoard.hidden = false; return; }
     active = states.get(card);
     if (!active) return;
     const actions = target === null ? active.actions : columnActions(active, target);
     if (!actions.length) return;
-    opener = card.querySelector("[data-board-action]");
+    opener = trigger || card.querySelector("[data-board-action]");
     phase = "editing"; discard.hidden = true; feedback.hidden = true; savedPosition = {left:window.scrollX,top:window.scrollY};
     form.reset(); comment.readOnly = false;
+    form.inert=false; document.dispatchEvent(new CustomEvent("ui:validate-files",{detail:{form}}));
     const upload = form.querySelector('input[type="file"]'); if (upload) upload.disabled = false;
     error.hidden = true; refresh.hidden = true; blocked = false;
     submit.disabled = false; actionSelect.disabled = false;
@@ -159,6 +196,7 @@
     if (actions.length > 1) {
       actionSelect.prepend(option("", "Выберите действие")); actionSelect.value = "";
     }
+    if (preferredKey && actions.some(a=>a.key===preferredKey)) actionSelect.value=preferredKey;
     bodyStyle = {overflow:document.body.style.overflow,padding:document.body.style.paddingRight};
     const gap = innerWidth - document.documentElement.clientWidth;
     document.body.style.paddingRight = `${(parseFloat(getComputedStyle(document.body).paddingRight)||0)+gap}px`;
@@ -167,8 +205,9 @@
   }
   function close() {
     if (pending) return;
-    if (phase !== "posted" && (comment.value || form.querySelector('input[type="file"]')?.files.length)) {
-      discard.hidden = false; document.querySelector("#board-keep").focus(); return;
+    if (phase !== "posted" && (comment.value || chosen()?.assignee && assignee.value || chosen()?.deadline && deadline.value !== (active?.due_at || "") || form.querySelector('input[type="file"]')?.files.length)) {
+      document.querySelector("#board-discard-message").textContent=phase==="uncertain" ? "Действие могло сохраниться. Закрыть текущий ввод без повторной отправки?" : "Комментарий или файлы ещё не отправлены. Закрыть без сохранения?";
+      discard.hidden = false; form.inert=true; document.querySelector("#board-keep").focus(); return;
     }
     finishClose();
   }
@@ -216,11 +255,10 @@
     let data;
     try { data = JSON.parse(card.dataset.boardTask); } catch (_) { return; }
     states.set(card, data);
-    const link = card.querySelector("[data-board-action]");
-    if (link) {
+    card.querySelectorAll("[data-board-action]").forEach(link => {
       link.setAttribute("aria-haspopup", "dialog");
-      link.addEventListener("click", event => { if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return; event.preventDefault(); open(card); });
-    }
+      link.addEventListener("click", event => { if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return; event.preventDefault(); open(card,null,link.dataset.boardAction,link); });
+    });
     const canDrag = columns.some(column => columnActions(data, column).length);
     card.draggable = canDrag;
     if (!canDrag) return;
@@ -262,33 +300,46 @@
   bindBoard();
   actionSelect.addEventListener("change", configure);
   cancel.addEventListener("click", close);
-  dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+  function requestClose() {
+    if (pending) return;
+    if (!discard.hidden) {discard.hidden=true;form.inert=false;comment.focus();}
+    else close();
+  }
+  dialog.addEventListener("cancel", event => {
+    event.preventDefault(); requestClose();
+  });
   dialog.addEventListener("keydown", event => {
+    if (event.key==="Escape") {event.preventDefault();event.stopPropagation();requestClose();return;}
     if (event.key !== "Tab") return;
     const items = Array.from(dialog.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]'))
-      .filter(item => item.getClientRects().length && !item.closest("[hidden]"));
+      .filter(item => item.getClientRects().length && !item.closest("[hidden],[inert]"));
+    if (!items.includes(document.activeElement)) {
+      event.preventDefault(); (event.shiftKey ? items.at(-1) : items[0])?.focus(); return;
+    }
     if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1)?.focus(); }
     else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0]?.focus(); }
   });
   document.addEventListener("focusin", event => {
     const card = event.target.closest("[data-board-task]");
     if (!card || document.querySelector("dialog[open]")) return;
-    const heading = card.closest(".board-column").querySelector(".board-column-heading").getBoundingClientRect();
+    const column=card.closest(".board-column"); if (!column) return;
+    const heading = column.querySelector(".board-column-heading").getBoundingClientRect();
     const rect = event.target.getBoundingClientRect();
     if (rect.top < heading.bottom + 8) window.scrollBy(0,rect.top - heading.bottom - 12);
   });
-  document.querySelector("#board-keep").addEventListener("click", () => { discard.hidden = true; comment.focus(); });
+  document.querySelector("#board-keep").addEventListener("click", () => { discard.hidden = true; form.inert=false; comment.focus(); });
+  document.querySelector("#board-close").addEventListener("click",close);
   document.querySelector("#board-discard-confirm").addEventListener("click", finishClose);
   async function refreshAction() {
     if (pending || revoked) return;
     pending = true; refresh.hidden = true; submit.disabled = true;
     saving.textContent = "Обновляем данные задачи…"; saving.hidden = false; form.setAttribute("aria-busy","true");
-    const oldAction = actionSelect.value, oldAssignees = Array.from(assignee.selectedOptions, o => o.value), oldDeadline = deadline.value;
+    const oldAction = actionSelect.value, oldAssignees = Array.from(assignee.selectedOptions, item => item.value), oldDeadline = deadline.value;
     try {
       await readBoard();
       if (phase === "posted") { say("Действие сохранено. Доска обновлена."); pending = false; finishClose(); return; }
       if (phase === "conflict") {
-        const card = document.querySelector(`[data-task-id="${active.id}"]`);
+        const card = findCard(active.id);
         if (!card || !states.get(card)?.actions.length) {
           error.textContent = "Задача больше не доступна для этого действия. Комментарий не отправлен.";
         } else {
@@ -302,13 +353,12 @@
           if (chosen()?.deadline) deadline.value = oldDeadline;
           error.textContent = "Данные обновлены. Комментарий сохранён. Проверьте действие и поля перед отправкой.";
         }
-      } else if (phase === "retired") error.textContent = "Данные обновлены. Закройте старую форму и откройте доступное действие заново.";
-      else error.textContent = "Доска перечитана. Результат прежней отправки мог быть сохранён; проверьте карточку. Эта форма повторно не отправляется.";
-      error.hidden = false; error.focus();
-    } catch (_) { error.textContent = revoked ? "Доступ изменился. Откройте страницу заново." : "Не удалось обновить доску. Повторите только загрузку данных."; error.hidden = false; refresh.hidden = revoked; error.focus(); }
+      } else error.textContent = "Доска перечитана. Результат прежней отправки мог быть сохранён; проверьте карточку. Эта форма повторно не отправляется.";
+      error.hidden = false;
+    } catch (_) { error.textContent = revoked ? "Доступ изменился. Откройте страницу заново." : "Не удалось обновить доску. Повторите только загрузку данных."; error.hidden = false; refresh.hidden = revoked; }
     finally { pending = false; saving.hidden = true; saving.textContent = "Сохраняем действие…"; form.removeAttribute("aria-busy"); submit.disabled = phase !== "editing" || blocked || !chosen(); cancel.disabled = false; }
   }
-  refresh.addEventListener("click", event => { event.preventDefault(); refreshAction(); });
+  refresh.addEventListener("click", event => { if(revoked)return; event.preventDefault(); refreshAction(); });
   retryBoard.addEventListener("click", async () => {
     if (pending || revoked) return; pending = true; retryBoard.disabled = true; retryBoard.textContent = "Обновляем доску…";
     try { await readBoard(); say("Доска обновлена. Проверьте актуальный статус задачи перед новым действием."); }
@@ -320,14 +370,17 @@
     event.preventDefault(); pending = true; say("Обновляем данные для действия…");
     try {
       await readBoard(); pending = false;
-      const card = document.querySelector(`[data-task-id="${event.detail.id}"]`);
+      const card = findCard(event.detail.id);
       if (card && states.get(card)?.actions.length) { fromPanel = true; open(card); }
       else document.dispatchEvent(new CustomEvent("task-board:action-closed",{detail:event.detail}));
     } catch (_) { pending = false; if (!revoked) { say("Не удалось обновить данные для действия. Повторите загрузку доски."); retryBoard.hidden = false; } }
   });
   form.addEventListener("submit", async event => {
     event.preventDefault();
-    if (pending || blocked || phase !== "editing" || !form.reportValidity()) return;
+    if (pending || blocked || phase !== "editing") return;
+    document.dispatchEvent(new CustomEvent("ui:validate-files",{detail:{form}}));
+    comment.setCustomValidity(comment.value.trim() ? "" : "Добавьте непустой комментарий.");
+    if (!form.reportValidity()) return;
     if (!comment.value.trim()) {
       error.textContent = "Добавьте непустой комментарий к действию.";
       error.hidden = false; comment.focus(); return;
@@ -335,63 +388,65 @@
     const action = chosen(); if (!action) return;
     const body = new FormData(form);
     pending = true; error.hidden = true; saving.hidden = false; discard.hidden = true;
+    submit.setAttribute("data-ui-busy",""); submit.setAttribute("aria-disabled","true");
     form.setAttribute("aria-busy", "true");
-    submit.disabled = true; cancel.disabled = true; actionSelect.disabled = true;
+    submit.disabled = true; cancel.disabled = true; document.querySelector("#board-close").disabled=true; actionSelect.disabled = true;
     comment.readOnly = true; assignee.disabled = true; deadline.disabled = true;
     const upload = form.querySelector('input[type="file"]'); if (upload) upload.disabled = true;
+    saving.focus({preventScroll:true});
     try {
       const response = await fetch(action.url, {method:"POST",body,credentials:"same-origin",headers:{Accept:"text/html"}});
       const finalURL = new URL(response.url);
-      if ([401,403,404].includes(response.status) || (response.redirected && (finalURL.origin !== location.origin || finalURL.pathname !== active.detail_url))) {
+      const expected=canonical(active.detail_url);
+      if ([401,403,404].includes(response.status) || (response.redirected && (!expected || finalURL.origin !== location.origin || finalURL.pathname !== expected.pathname))) {
         blocked = true; phase = "revoked"; purge("Действие недоступно или сеанс завершён. Откройте страницу заново.");
-        error.textContent = "Доступ изменился. Данные и несохранённый ввод очищены."; error.hidden = false; return;
+        error.textContent = "Доступ изменился. Данные и несохранённый ввод очищены."; error.hidden = false; error.focus(); return;
       }
-      if (response.ok && response.redirected && finalURL.origin === location.origin && finalURL.pathname === active.detail_url) {
+      if (response.ok && response.redirected && expected && finalURL.origin === location.origin && finalURL.pathname === expected.pathname) {
         phase = "posted"; blocked = true; needsRead = true;
         saving.textContent = "Действие сохранено. Обновляем доску…";
         try {
-          await readBoard(); say("Действие сохранено. Карточки и счётчики обновлены.");
+          await readBoard(); say(fullMode ? "Действие сохранено. Задача и обсуждение обновлены." : "Действие сохранено. Карточки и счётчики обновлены.");
           pending = false; finishClose();
         } catch (_) {
           error.textContent = revoked ? "Действие сохранено, но доступ к доске изменился. Откройте страницу заново." : "Действие сохранено, но доску обновить не удалось. Повторите только обновление.";
-          error.hidden = false; refresh.hidden = revoked; retryBoard.hidden = revoked;
+          error.hidden = false; error.focus(); refresh.hidden = revoked; retryBoard.hidden = revoked;
         }
         return;
       }
       const parsed = new DOMParser().parseFromString(await response.text(),"text/html");
-      const fieldError = parsed.querySelector(".flash.error[role=alert] p");
-      const explanation = (fieldError?.textContent || parsed.body.textContent)?.trim();
-      if (response.status === 410) {
-        phase = "retired"; blocked = true; needsRead = true;
-        error.textContent = "Это действие больше не используется. Комментарий не отправлен. Обновите страницу и выберите доступное действие.";
-      } else if (response.status === 409) {
+      const explanation = parsed.querySelector(".flash.error[role=alert] p")?.textContent?.trim();
+      if (response.status === 409) {
         phase = "conflict"; blocked = true; needsRead = true;
-        error.textContent = "Задача уже изменена. Комментарий сохранён. Обновите данные перед новым действием.";
-      } else if (response.status === 400 && !fieldError) {
-        phase = "conflict"; blocked = true; needsRead = true;
-        error.textContent = "Не удалось проверить форму. Комментарий сохранён. Обновите данные перед новым действием.";
-      } else if ([400,413,422].includes(response.status) && !response.redirected && explanation) {
-        phase = "editing"; blocked = false; error.textContent = explanation.slice(0,500);
+        error.textContent = (explanation || "Задача уже изменена.") + " Комментарий сохранён. Перечитайте данные перед новым действием.";
+      } else if ([400,413,422].includes(response.status) && !response.redirected) {
+        phase = "editing"; blocked = false; error.textContent = (explanation || (response.status===413 ? "Превышен размер запроса. Уменьшите набор файлов и выберите их повторно." : "Проверьте поля формы. Отправка не выполнена.")).slice(0,500);
+        const field=parsed.querySelector("[data-error-field]")?.dataset.errorField;
+        const input=field && form.elements.namedItem(field);
+        if (input) {input.setAttribute("aria-invalid","true");input.setAttribute("aria-describedby","board-error");}
       } else {
         phase = "uncertain"; blocked = true; needsRead = true;
         error.textContent = "Не удалось подтвердить результат отправки. Не отправляйте действие повторно; сначала обновите доску.";
       }
       error.hidden = false; refresh.hidden = !blocked; error.focus();
       const files = form.querySelector('input[type="file"]');
-      if (files?.files.length) { files.value = ""; error.textContent += " Выберите файлы повторно после проверки данных."; }
+      if (files?.files.length) { files.value = ""; document.dispatchEvent(new CustomEvent("ui:validate-files",{detail:{form}})); error.textContent += " Выберите файлы повторно после проверки данных."; }
     } catch (_) {
       phase = "uncertain"; blocked = true; needsRead = true;
       error.textContent = "Ответ сервера не получен. Действие могло сохраниться. Повторите только загрузку доски.";
       const files = form.querySelector('input[type="file"]');
-      if (files?.files.length) { files.value = ""; error.textContent += " Перед новым действием выберите файлы повторно."; }
+      if (files?.files.length) { files.value = ""; document.dispatchEvent(new CustomEvent("ui:validate-files",{detail:{form}})); error.textContent += " Перед новым действием выберите файлы повторно."; }
       error.hidden = false; refresh.hidden = false; error.focus();
     } finally {
       pending = false; saving.hidden = true; saving.textContent = "Сохраняем действие…"; form.removeAttribute("aria-busy");
-      submit.disabled = blocked || phase !== "editing" || !chosen(); cancel.disabled = false; actionSelect.disabled = blocked;
+      submit.removeAttribute("data-ui-busy"); submit.removeAttribute("aria-disabled");
+      submit.disabled = blocked || phase !== "editing" || !chosen(); cancel.disabled = false; document.querySelector("#board-close").disabled=false; actionSelect.disabled = blocked;
       comment.readOnly = phase === "posted" || revoked;
       const upload = form.querySelector('input[type="file"]'); if (upload) upload.disabled = phase === "posted" || revoked;
       assignee.disabled = blocked || !chosen()?.assignee; deadline.disabled = blocked || !chosen()?.deadline;
       retryBoard.hidden = !needsRead || revoked;
+      if (revoked) {refresh.hidden=false;refresh.href=location.href;refresh.textContent="Открыть страницу заново";}
     }
   });
+  comment.addEventListener("input",()=>comment.setCustomValidity(""));
 })();

@@ -1,56 +1,57 @@
 <!doctype html>
-<html lang="{{ language }}">
+<html lang="ru">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}{{ t('Платформа отделов') }}{% endblock %}</title>
+    <title>{% block title %}Платформа отделов{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='caspian-palette.css') }}">
+    <script src="{{ url_for('static', filename='ui.js') }}" defer></script>
   </head>
-  <body>
-    <a class="skip-link" href="#main">{{ t('Перейти к содержимому') }}</a>
+  <body class="{% block body_class %}{% endblock %}">
+    {% from 'components/icons.html' import icon %}
+    {% from 'components/ui.html' import nav_link %}
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    {% if integrated_preview_mode|default(false) %}<div class="preview-banner"><strong>Интеграционный стенд</strong><span>Синтетические данные · настоящие обработчики и авторизация · отдельная тестовая БД.</span></div>{% endif %}
+    {% if preview_mode|default(false) %}
+    <aside class="preview-banner" role="note" aria-label="Демонстрация интерфейса"><strong>Демонстрация интерфейса</strong><span>Синтетические данные · вход и рабочие операции не подключены.</span><a href="{{ url_for('preview_catalog') }}">Карта страниц {{ icon('arrow', 15) }}</a></aside>
+    {% endif %}
+    {% set user = g.user %}
+    {% set endpoint = request.endpoint or '' %}
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">CC</span><span class="brand-name">Caspian College<small>{{ t('Платформа отделов') }}</small></span></a>
-        {% if g.user %}
-        <nav class="primary-nav" aria-label="{{ t('Основная навигация') }}">
-          {% if g.user['role'] in ['head', 'employee', 'admin'] and (g.user['role'] == 'admin' or g.user['department_id']) %}
-          <a class="nav-link" href="{{ url_for('tasks.received_tasks') }}" {% if request.blueprint == 'tasks' and not request.endpoint.startswith('tasks.notification_') %}aria-current="page"{% endif %}>{{ t('Задачи') }}</a>
+        <a class="brand" href="{{ url_for('index') }}"><img class="brand-logo" src="{{ url_for('static',filename='caspian-college-logo.png') }}" width="1280" height="1152" alt="" aria-hidden="true"><span class="brand-name">Caspian College<small>Платформа отделов</small></span></a>
+        {% if user %}
+        <button type="button" class="nav-toggle secondary-button" data-nav-toggle aria-label="Основное меню" aria-controls="primary-navigation" aria-expanded="false">{{ icon('menu') }}<span>Меню</span></button>
+        <nav id="primary-navigation" class="primary-nav" aria-label="Основная навигация">
+          {{ nav_link('Задачи', url_for('tasks.received_tasks'), 'tasks', endpoint.startswith('tasks.') and not endpoint.startswith('tasks.notification')) }}
+          {% if user.role == 'head' %}
+          {% set department_staff_url = staff_url if staff_url is defined else url_for('staff.staff_list') %}
+          {{ nav_link('Сотрудники', department_staff_url, 'people', endpoint.startswith('staff.') or endpoint.startswith('preview_staff')) }}
           {% endif %}
-          {% if g.user['role'] == 'admin' %}
-          <a class="nav-link" href="{{ url_for('admin.admin_users') }}" {% if request.endpoint and request.endpoint.startswith('admin.admin_user') %}aria-current="page"{% endif %}>{{ t('Пользователи') }}</a>
-          <a class="nav-link" href="{{ url_for('admin.admin_departments') }}" {% if request.endpoint and request.endpoint.startswith('admin.admin_department') %}aria-current="page"{% endif %}>Отделы</a>
-          <a class="nav-link" href="{{ url_for('admin.admin_audit') }}" {% if request.endpoint == 'admin.admin_audit' %}aria-current="page"{% endif %}>Журнал действий</a>
+          {% if user.role == 'admin' %}
+          {{ nav_link('Пользователи', url_for('admin.admin_users'), 'people', endpoint.startswith('admin.admin_user')) }}
+          {{ nav_link('Отделы', url_for('admin.admin_departments'), 'building', endpoint.startswith('admin.admin_department')) }}
+          {{ nav_link('Журнал действий', url_for('admin.admin_audit'), 'history', endpoint == 'admin.admin_audit') }}
           {% endif %}
-          {% if g.user['role'] == 'head' %}<a class="nav-link" href="{{ url_for('staff.staff_list') }}" {% if request.blueprint == 'staff' %}aria-current="page"{% endif %}>Сотрудники</a>{% endif %}
-          {% if g.user['role'] == 'head' %}<a class="nav-link" href="{{ url_for('reports.own_department_report') }}" {% if request.blueprint == 'reports' %}aria-current="page"{% endif %}>Отчёты</a>{% endif %}
-          {% if g.user['role'] == 'admin' %}<a class="nav-link" href="{{ url_for('admin.admin_statistics') }}" {% if request.endpoint == 'admin.admin_statistics' %}aria-current="page"{% endif %}>Отчёты</a>{% endif %}
-          {% if g.user['role'] in ['head', 'employee', 'admin'] and (g.user['role'] == 'admin' or g.user['department_id']) %}
-          <a class="nav-link" href="{{ url_for('tasks.notification_center') }}" {% if request.endpoint and request.endpoint.startswith('tasks.notification_') %}aria-current="page"{% endif %}>{{ t('Уведомления') }} <span class="notification-count" role="status" aria-live="polite" aria-atomic="true" aria-label="{{ t('Непрочитанных уведомлений: {count}', count=unread_notification_count) }}">{{ unread_notification_count }}</span></a>
+          {% if user.role in ['head','admin'] %}
+          {{ nav_link('Отчёты', url_for('admin.admin_statistics' if user.role == 'admin' else 'reports.own_department_report'), 'chart', endpoint.startswith('reports.') or endpoint == 'admin.admin_statistics') }}
           {% endif %}
+          {{ nav_link('Уведомления', url_for('tasks.notification_center'), 'bell', endpoint.startswith('tasks.notification'), unread_notification_count) }}
         </nav>
-        {% endif %}
-        {% if g.user %}
         <details class="account-menu">
-          <summary aria-label="Учётная запись: {{ g.user['full_name'] }}">
-            <span class="account-avatar" aria-hidden="true">{{ g.user['full_name'][0] }}</span>
-            <span class="account-summary"><strong>{{ g.user['full_name'] }}</strong><small>{{ t(portal_roles[g.user['role']]) }}</small></span>
-            <svg class="account-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
-          </summary>
-          <div class="account-panel">
-            <strong>{{ g.user['full_name'] }}</strong>
-            <p>{{ t(portal_roles[g.user['role']]) }}{% if current_user.department %}<br>{{ current_user.department.name }}{% endif %}</p>
-            <form action="{{ url_for('auth.logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary-button">{{ t('Выйти') }}</button></form>
+          <summary aria-label="Учётная запись: {{ user.full_name }}"><span class="account-avatar" aria-hidden="true">{{ user.full_name[0] }}</span><span class="account-summary"><strong>{{ user.full_name }}</strong><small>{{ portal_roles[user.role] }}</small></span>{{ icon('chevron', 15) }}</summary>
+          <div class="account-panel"><strong>{{ user.full_name }}</strong><p>{{ portal_roles[user.role] }}{% if current_user.department %}<br>{{ current_user.department.name }}{% endif %}</p>
+            <form action="{{ url_for('auth.logout') }}" method="post" data-ui-form><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary-button">{{ icon('logout', 17) }}Выйти</button></form>
           </div>
         </details>
-        {% endif %}
+        {% else %}<span class="header-caption">{{ icon('lock', 16) }}Внутренняя платформа</span>{% endif %}
       </div>
     </header>
     <main class="container {% block main_class %}{% endblock %}" id="main" tabindex="-1">
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for category, message in messages %}<div class="message {{ category }}" {% if category == 'error' %}role="alert" aria-live="assertive"{% else %}role="status" aria-live="polite"{% endif %}>{{ t(message) }}</div>{% endfor %}
-      {% endwith %}
+      {% block flash_messages %}{% with messages = get_flashed_messages(with_categories=true) %}{% for category, text in messages %}<div class="message message-{{ 'error' if category == 'error' else 'info' }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ text }}</div>{% endfor %}{% endwith %}{% endblock %}
       {% block content %}{% endblock %}
     </main>
-    <footer class="portal-footer"><span>© 2026 Caspian College</span><span>{{ t("Платформа отделов") }}</span></footer>
+    <footer class="portal-footer"><span>© 2026 Caspian College</span><span>Платформа отделов</span></footer>
   </body>
 </html>

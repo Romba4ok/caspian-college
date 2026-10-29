@@ -1,0 +1,63 @@
+{% import 'components/forms.html' as forms %}
+{% from 'components/icons.html' import icon %}
+{% macro hints() -%}
+{% set text={
+'assign':'Назначьте одного или нескольких участников. Задача сразу перейдёт в работу.',
+'claim':'Вы присоединитесь к задаче. Остальные исполнители сохранятся.',
+'reassign':'Выберите весь итоговый состав. Сохраните выбранными участников, которые продолжат работу.',
+'release':'Вы снимете только себя. Если останутся другие исполнители, задача останется в работе; иначе станет новой.',
+'complete':'Вы завершите всю задачу для команды. Отправитель увидит результат.',
+'return':'Задача вернётся в работу с доступными прежними исполнителями. Если состав пуст, потребуется назначение или присоединение. Прежний результат останется в истории.',
+'cancel':'Задача будет окончательно отменена. История сохранится.',
+'reject':'Задача будет окончательно отклонена. Объясните причину.',
+'deadline':'Изменится только срок. Старое и новое значения сохранятся в истории.',
+'comment':'Комментарий и файлы сохранятся в обсуждении. Статус, состав исполнителей и срок не изменятся.',
+'upload':'Создастся один комментарий с выбранными файлами. Выберите хотя бы один файл.'
+} %}{{ text|tojson }}{%- endmacro %}
+{% macro dialog(policy, refresh_url) -%}
+<dialog id="board-dialog" class="board-dialog task-action-dialog" aria-labelledby="board-dialog-title" aria-describedby="board-dialog-task" data-action-hints="{{ hints()|forceescape }}">
+<header class="action-dialog-heading"><div><p class="reading-eyebrow">РАБОТА С ЗАДАЧЕЙ</p><h2 id="board-dialog-title">Действие с задачей</h2></div><button type="button" class="secondary-button" id="board-close" aria-label="Закрыть действие">Закрыть</button></header>
+<p id="board-dialog-task" class="action-task-title"></p>
+<div id="board-error" class="message error" role="alert" tabindex="-1" hidden></div>
+<a class="board-refresh button secondary-button" href="{{ refresh_url }}" hidden>Перечитать данные</a>
+<form method="post" enctype="multipart/form-data" id="board-action-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="revision" id="board-revision">
+<div class="field"><label for="board-action">Действие</label><select id="board-action" required aria-describedby="board-action-help"></select><p id="board-action-help" class="hint"></p></div>
+<div class="field" id="board-assignee-field" hidden><label for="board-assignee">Исполнители <span class="required">*</span></label><select id="board-assignee" name="assignee_ids" multiple size="5" disabled aria-describedby="board-assignee-help"></select><p id="board-assignee-help" class="hint">Один или несколько участников отдела. Для выбора нескольких удерживайте Ctrl или Cmd. При изменении состава оставьте выбранными всех, кто продолжит работу.</p></div>
+<div class="field" id="board-deadline-field" hidden><label for="board-deadline">Новый срок <span class="required">*</span></label><input id="board-deadline" type="datetime-local" name="due_at" disabled><p class="hint">Asia/Qyzylorda · срок обязателен.</p></div>
+<div class="field"><label for="board-comment">Комментарий <span class="required">*</span></label><textarea id="board-comment" name="comment" rows="4" required aria-describedby="board-comment-help"></textarea><p id="board-comment-help" class="hint">Опишите результат, замечания или причину действия.</p></div>
+{% if policy and policy.allowed_extensions %}{{ forms.file_field('attachment','Файлы к комментарию',policy) }}{% endif %}
+<p id="board-saving" role="status" aria-live="polite" tabindex="-1" hidden>Сохраняем действие…</p>
+<div class="action-dialog-buttons"><button id="board-submit" type="submit">Подтвердить</button><button id="board-cancel" class="secondary-button" type="button">Отмена</button></div>
+</form>
+<div id="board-discard" role="group" aria-labelledby="board-discard-heading" hidden><h3 id="board-discard-heading">Несохранённый ввод</h3><p id="board-discard-message">Комментарий или файлы ещё не отправлены. Закрыть без сохранения?</p><div class="action-dialog-buttons"><button type="button" id="board-keep">Продолжить редактирование</button><button type="button" class="secondary-button" id="board-discard-confirm">Закрыть без сохранения</button></div></div>
+</dialog>
+{%- endmacro %}
+{% macro full_controls() -%}
+{% set ns=namespace(actions=task_actions|list,candidates=[]) %}
+{% if may_contribute and comment_url|default(none) %}
+{% set ns.actions=ns.actions+[dict(key='comment',label='Добавить комментарий',url=comment_url,target=task.status,assignee=false,deadline=false,terminal=false)] %}
+{% if upload_url|default(none) and upload_policy and upload_policy.allowed_extensions %}{% set ns.actions=ns.actions+[dict(key='upload',label='Добавить файлы',url=upload_url,target=task.status,assignee=false,deadline=false,terminal=false)] %}{% endif %}
+{% endif %}
+{% for person in assignee_candidates %}{% set ns.candidates=ns.candidates+[dict(id=person.id,name=person.full_name,role={'head':'Начальник','employee':'Сотрудник'}.get(person.role,person.role))] %}{% endfor %}
+{% if ns.actions %}
+{% set state=dict(id=task.id,title=task.title,revision=task.revision,status=task.status,group=task.status,actions=ns.actions,candidates=ns.candidates,assignee_ids=task.assignee_ids,detail_url=url_for('tasks.task_detail',task_id=task.id),due_at=(task.due_at|task_datetime('%Y-%m-%dT%H:%M')) if task.due_at else '') %}
+<section class="card task-full-actions" id="task-permitted-actions" data-task-id="{{ task.id }}" data-board-task="{{ state|tojson|forceescape }}">
+<h2>Действия и обсуждение</h2>
+<div class="task-action-links">{% for action in ns.actions %}<a class="button {{ 'secondary-button' if action.key in ['comment','upload','deadline'] else '' }}" data-board-action="{{ action.key }}" href="#native-action-{{ action.key }}">{{ action.label }}</a>{% endfor %}</div>
+<div class="task-native-forms">
+{% for action in ns.actions %}
+<div id="native-action-{{ action.key }}"><details{% if failed_action == action.key %} open{% endif %}><summary>{{ action.label }}</summary>
+{% set failed = action_error and failed_action == action.key %}
+{% if failed %}<div class="error-summary" role="alert" tabindex="-1"><p>{{ action_error }}</p>{% if action_error_field in ['assignee_ids','due_at','comment','attachment'] %}<a href="#{{ action.key }}-{{ action_error_field }}">Проверить поле</a>{% endif %}<a href="{{ url_for('tasks.task_detail',task_id=task.id) }}">Обновить карточку</a></div>{% endif %}
+<form method="post" enctype="multipart/form-data" action="{{ action.url }}" data-ui-form>
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="revision" value="{{ task.revision }}">
+{% if action.assignee %}<label for="{{ action.key }}-assignee_ids">Исполнители · обязательно</label><select name="assignee_ids" id="{{ action.key }}-assignee_ids" multiple size="5" required{% if failed and action_error_field == 'assignee_ids' %} aria-invalid="true" aria-describedby="{{ action.key }}-{{ action_error_field }}-error"{% endif %}>{% for person in assignee_candidates %}<option value="{{ person.id }}"{% if (failed and person.id|string in request.form.getlist('assignee_ids')) or (not failed and action.key == 'reassign' and person.id in task.assignee_ids) %} selected{% endif %}>{{ person.full_name }}</option>{% endfor %}</select>{% if failed and action_error_field == 'assignee_ids' %}<p class="field-error" id="{{ action.key }}-assignee_ids-error">{{ action_error }}</p>{% endif %}<p class="hint">Выберите весь итоговый состав. Для выбора нескольких удерживайте Ctrl или Cmd.</p>{% endif %}
+{% if action.deadline %}<label for="{{ action.key }}-due_at">Новый срок · Asia/Qyzylorda</label><input type="datetime-local" name="due_at" id="{{ action.key }}-due_at" required value="{{ request.form.get('due_at', state.due_at) if failed else state.due_at }}"{% if failed and action_error_field == 'due_at' %} aria-invalid="true" aria-describedby="{{ action.key }}-due_at-error"{% endif %}>{% if failed and action_error_field == 'due_at' %}<p class="field-error" id="{{ action.key }}-due_at-error">{{ action_error }}</p>{% endif %}{% endif %}
+<label for="{{ action.key }}-comment">Комментарий · обязательно</label><textarea id="{{ action.key }}-comment" name="comment" rows="4" required{% if failed and action_error_field == 'comment' %} aria-invalid="true" aria-describedby="{{ action.key }}-{{ action_error_field }}-error"{% endif %}>{{ request.form.get('comment','') if failed else '' }}</textarea>{% if failed and action_error_field == 'comment' %}<p class="field-error" id="{{ action.key }}-comment-error">{{ action_error }}</p>{% endif %}
+{% if upload_policy and upload_policy.allowed_extensions %}<label for="{{ action.key }}-attachment">Файлы к комментарию</label><input type="file" id="{{ action.key }}-attachment" name="attachment" multiple{% if action.key=='upload' %} required{% endif %} accept=".{{ upload_policy.allowed_extensions|join(',.') }}"{% if failed and action_error_field == 'attachment' %} aria-invalid="true" aria-describedby="{{ action.key }}-attachment-error"{% endif %}>{% if failed and action_error_field == 'attachment' %}<p class="field-error" id="{{ action.key }}-attachment-error">{{ action_error }}</p>{% endif %}<p class="hint">До 20 МБ на файл, весь запрос — до 21 МБ. После ошибки выберите файлы повторно.</p>{% endif %}
+<button type="submit">{{ action.label }}</button></form></details></div>{% endfor %}
+</div></section>
+{% endif %}
+{% if action_error and request.form.get('comment') and failed_action not in ns.actions|map(attribute='key')|list %}<section class="card"><h2>Неотправленный текст</h2><label for="unsaved-action-comment">Ваш несохранённый комментарий</label><textarea id="unsaved-action-comment" readonly>{{ request.form.get('comment') }}</textarea><p>Доступные действия изменились. Комментарий не отправлен; сохраните текст перед обновлением.</p><a href="{{ url_for('tasks.task_detail',task_id=task.id) }}">Обновить карточку</a></section>{% endif %}
+{%- endmacro %}

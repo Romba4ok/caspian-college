@@ -1,57 +1,54 @@
 {% extends 'base.html' %}
+{% import 'components/forms.html' as forms %}
+{% from 'components/icons.html' import icon %}
+{% from 'components/ui.html' import task_symbol %}
 {% block title %}Новая задача · Задачи{% endblock %}
+{% block main_class %}task-create-workspace{% endblock %}
 {% block content %}
-<div class="page-heading">
-  <div><p class="hint">Отдел: {{ current_user.department.name }}</p>
-    <h1>Новая задача</h1>
-    <p>После отправки задача сразу появится у другого отдела в статусе «Новая».</p>
-  </div>
-  <a href="{{ url_for('tasks.sent_tasks') }}">Назад</a>
-</div>
-{% macro error_for(field) %}{% if form_error and error_field == field %}<span class="hint" id="{{ field }}-error" role="alert">{{ form_error }}</span>{% endif %}{% endmacro %}
-<section class="card form-card wide task-form-card">
-  {% if form_error %}
-  <div class="flash error" role="alert" tabindex="-1" autofocus>
-    <h2>Проверьте задачу</h2><p>{{ form_error }}</p>
-    {% if error_field and error_field != "creation_key" %}<a href="#{{ error_field }}">Перейти к полю</a>{% endif %}
-    <p>При ошибке данные не сохраняются. При конфликте отправки проверьте уже созданную задачу; для другого поручения откройте новую форму.</p>
-  </div>
-  {% endif %}
-  <form method="post" enctype="multipart/form-data" class="form-stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="creation_key" value="{{ creation_key }}">
-
-    <label for="recipient_department_id">Отдел-получатель <span class="hint">Обязательно</span></label>
-    <select id="recipient_department_id" name="recipient_department_id" required {% if form_error and error_field == "recipient_department_id" %}aria-invalid="true" aria-describedby="recipient_department_id-error"{% endif %}>
-      <option value="">Выберите отдел</option>
-      {% set chosen = request.form.get('recipient_department_id', '') %}
-      {% for department in departments %}<option value="{{ department.id }}" {% if chosen == department.id|string %}selected{% endif %}>{{ department.name }}</option>{% endfor %}
-    </select>{{ error_for('recipient_department_id') }}
-    <label for="title">Название <span class="hint">Обязательно</span></label>
-    <input id="title" name="title" maxlength="200" required value="{{ request.form.get('title', '') }}" {% if form_error and error_field == "title" %}aria-invalid="true" aria-describedby="title-error"{% endif %}>
-    {{ error_for('title') }}
-    <label for="description">Описание <span class="hint">Обязательно</span></label>
-    <textarea id="description" name="description" rows="7" required aria-describedby="description-help{% if form_error and error_field == 'description' %} description-error{% endif %}" {% if form_error and error_field == 'description' %}aria-invalid="true"{% endif %}>{{ request.form.get('description', '') }}</textarea>
-    {{ error_for('description') }}<p class="hint" id="description-help">При создании описание также сохраняется первым комментарием.</p>
-    <div class="task-form-grid">
-      <label for="priority">Приоритет
-        <select id="priority" name="priority" {% if form_error and error_field == "priority" %}aria-invalid="true" aria-describedby="priority-error"{% endif %}>{% for key, label in priority_labels.items() %}<option value="{{ key }}" {% if request.form.get('priority', 'normal') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
-        {{ error_for('priority') }}
-      </label>
-      <label for="due_at">Срок выполнения <span class="hint">Обязательно; {{ config.TASK_TIMEZONE }}</span>
-        <input id="due_at" type="datetime-local" name="due_at" required value="{{ request.form.get('due_at', '') }}" {% if form_error and error_field == "due_at" %}aria-invalid="true" aria-describedby="due_at-error"{% endif %}>
-        {{ error_for('due_at') }}
-      </label>
-    </div>
-    <p class="hint">Начальник получателя назначит исполнителя, либо сотрудник отдела сам возьмёт свободную задачу.</p>
-
-    {% if upload_policy and upload_policy.allowed_extensions %}
-    <label for="attachment">Файлы к комментарию <span class="hint">Необязательно</span></label>
-    <input id="attachment" type="file" name="attachment" multiple {% if form_error and error_field == "attachment" %}aria-invalid="true" aria-describedby="attachment-error"{% endif %} accept=".{{ upload_policy.allowed_extensions|join(',.') }}">
-    {{ error_for('attachment') }}
-    <p class="hint">Форматы: {{ upload_policy.allowed_extensions|join(', ')|upper }}. До {{ upload_policy.max_upload_mb }} МБ на файл; весь запрос — до 21 МБ. Можно выбрать несколько файлов. Остальные материалы добавьте следующим комментарием. После ошибки выберите файл повторно.</p>
-    {% endif %}
-    <div class="actions task-form-actions"><button type="submit">Отправить задачу</button><a href="{{ url_for('tasks.sent_tasks') }}">Отмена</a></div>
-  </form>
+<nav class="create-breadcrumb" aria-label="Вы здесь"><a href="{{ url_for('tasks.sent_tasks') }}">Другим отделам</a><span aria-hidden="true">/</span><span>Новая задача</span></nav>
+<header class="create-heading"><h1>Новая задача</h1><p>После отправки задача сразу появится у отдела-получателя.</p></header>
+{% if preview_mode|default(false) and creation_receipt|default(none) %}
+<section class="card create-success" role="status" tabindex="-1" data-creation-receipt>
+<span class="create-success-icon">{{ icon('check',28) }}</span><h2>Демонстрационная отправка подтверждена</h2>
+<p>Ответ локального демостенда получен. Рабочая задача не создавалась.</p>
+<dl class="task-facts"><div class="task-fact"><dt>Название</dt><dd>{{ creation_receipt.title }}</dd></div><div class="task-fact"><dt>Отдел-получатель</dt><dd>{{ creation_receipt.recipient }}</dd></div><div class="task-fact"><dt>Срок · Asia/Qyzylorda</dt><dd>{{ creation_receipt.due_at }}</dd></div><div class="task-fact"><dt>Файлы</dt><dd>{{ creation_receipt.file_count }}</dd></div></dl>
+<a class="button" href="{{ url_for('tasks.task_new') }}">Создать ещё задачу {{ task_symbol('plus',18) }}</a><a class="button secondary-button" href="{{ url_for('tasks.sent_tasks') }}">К задачам</a>
 </section>
+{% else %}
+{% set known_fields=['recipient_department_id','title','description','priority','due_at','attachment'] %}
+{% set errors={error_field:form_error} if form_error and error_field in known_fields else {} %}
+<div class="task-create-layout">
+<section class="card create-form-card" aria-label="Данные новой задачи">
+<form method="post" action="{{ url_for('tasks.task_new') }}" enctype="multipart/form-data" data-ui-form data-task-create>
+{{ forms.error_summary(errors, form_error if form_error and error_field not in known_fields else '', prefix='') }}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="creation_key" value="{{ creation_key }}">
+{{ forms.select_field('recipient_department_id','Отдел-получатель',departments,request.form.get('recipient_department_id',''),true,placeholder='Выберите отдел',error=errors.get('recipient_department_id',''),identifier='recipient_department_id') }}
+{{ forms.field('title','Название',value=request.form.get('title',''),required=true,maxlength=200,error=errors.get('title',''),identifier='title') }}
+{{ forms.textarea_field('description','Описание',request.form.get('description',''),true,hint='Опишите ожидаемый результат и важные условия.',error=errors.get('description',''),identifier='description') }}
+<div class="create-field-grid">
+{{ forms.select_field('priority','Приоритет',priority_labels.items(),request.form.get('priority','normal'),true,value_attr=0,label_attr=1,error=errors.get('priority',''),identifier='priority') }}
+{{ forms.field('due_at','Срок выполнения',input_type='datetime-local',value=request.form.get('due_at',''),required=true,hint='Часовой пояс: Asia/Qyzylorda',error=errors.get('due_at',''),identifier='due_at') }}
+</div>
+{% if upload_policy and upload_policy.allowed_extensions %}
+{{ forms.file_field('attachment','Файлы',upload_policy,errors.get('attachment',''),identifier='attachment') }}
+{% endif %}
+{% if form_error %}<p class="create-reselect">{{ icon('info',17) }}Введённый текст сохранён. Если прикладывали файлы, выберите их повторно; при повторе неподтверждённой отправки — те же файлы.</p>{% endif %}
+<div class="create-actions">{{ forms.submit_button('Отправить задачу','Отправляем задачу…') }}<a class="button secondary-button" data-create-cancel href="{{ url_for('tasks.sent_tasks') }}">Отмена</a></div>
+<p class="sr-only" data-form-pending role="status" aria-live="polite"></p>
+</form>
+</section>
+<aside class="card create-explanation" aria-labelledby="create-next-title">
+<h2 id="create-next-title">Что произойдёт после отправки?</h2>
+<ol><li><span>1</span><p>Задача получит статус «Новая».</p></li><li><span>2</span><p>Начальник получателя назначит исполнителя, либо сотрудник отдела возьмёт свободную задачу.</p></li><li><span>3</span><p>После выполнения задача попадёт в завершённые.</p></li></ol>
+<p class="create-info">{{ task_symbol('comment',19) }}Уточнения — в комментариях.</p>
+<p class="create-warning">{{ icon('lock',19) }}После отправки основные поля фиксируются. Срок активной задачи меняет начальник отдела-заказчика.</p>
+<p class="hint">Отправитель: {{ current_user.department.name }}</p>
+</aside>
+</div>
+<dialog class="create-discard-dialog" aria-labelledby="create-discard-title" id="create-discard">
+<h2 id="create-discard-title">Выйти без отправки?</h2><p>Введённые данные и выбранные файлы не сохранятся.</p>
+<div class="create-discard-actions"><button type="button" class="secondary-button" data-create-keep autofocus>Продолжить заполнение</button><button type="button" data-create-leave>Выйти без отправки</button></div>
+</dialog>
+{% endif %}
 {% endblock %}

@@ -1,14 +1,17 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Изменить сотрудника' if employee else 'Новый сотрудник' }} · Caspian College{% endblock %}
+{% import 'components/forms.html' as forms %}
+{% import 'components/ui.html' as ui %}
+{% set editing = employee is not none %}
+{% block title %}{{ 'Изменить сотрудника' if editing else 'Новый сотрудник' }} · Caspian College{% endblock %}
 {% block content %}
-<section class="card form-card"><h1>{{ 'Изменить сотрудника' if employee else 'Новый сотрудник' }}</h1><p>Сотрудник отдела «{{ department.name }}». Роль и отдел назначаются автоматически.</p>
-{% if error %}<div class="flash error" role="alert" tabindex="-1" autofocus>{{ error }}</div>{% endif %}
-<form method="post" class="form-stack">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <label for="staff-name">Полное имя</label><input id="staff-name" name="full_name" maxlength="160" required value="{{ request.form.get('full_name', employee.full_name if employee else '') }}">
-  <label for="staff-username">Логин</label><input id="staff-username" name="username" maxlength="80" autocomplete="off" required value="{{ request.form.get('username', employee.username if employee else '') }}">
-  <label for="staff-password">{{ 'Новый пароль' if employee else 'Пароль' }}</label><input id="staff-password" name="password" type="password" autocomplete="new-password" {% if not employee %}required{% endif %} aria-describedby="staff-password-hint">
-  <p class="hint" id="staff-password-hint">{% if employee %}Оставьте пустым, чтобы сохранить пароль. Смена пароля завершит прежние сеансы сотрудника.{% else %}Передайте сотруднику логин и пароль.{% endif %}</p>
-  <div class="actions"><button type="submit">Сохранить</button><a href="{{ url_for('staff.staff_list') }}">Отмена</a></div>
-</form></section>
+<div class="people-workspace"><a class="people-back" data-account-cancel href="{{ url_for('staff.staff_list') }}">← К сотрудникам</a>
+<div class="people-heading"><div><span class="eyebrow">КОМАНДА ОТДЕЛА</span><h1>{{ 'Изменить сотрудника' if editing else 'Новый сотрудник' }}</h1><p>{{ department.name }}</p></div></div>
+<div class="account-layout"><section class="card account-form-card"><h2>Данные учётной записи</h2>
+<form method="post" action="{{ url_for('staff.staff_edit',user_id=employee.id) if editing else url_for('staff.staff_new') }}" data-ui-form data-account-form data-account-unsaved="{{ 'true' if request.method == 'POST' else 'false' }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{{ forms.error_summary(form_errors|default({}),error|default('') or '') }}
+{{ forms.account_fields(employee,form_errors|default({}),staff=true) }}
+<div class="account-form-actions">{{ forms.submit_button('Сохранить изменения' if editing else 'Добавить сотрудника','Сохраняем…') }}<a class="button secondary-button" data-account-cancel href="{{ url_for('staff.staff_list') }}">Отмена</a></div><p class="sr-only" data-form-pending role="status" aria-live="polite"></p>
+</form></section><aside class="card account-explanation"><span class="eyebrow">ДОСТУП СОТРУДНИКА</span><h2>Свой отдел</h2><dl><dt>Роль</dt><dd>Сотрудник отдела</dd><dt>Отдел</dt><dd>{{ department.name }}</dd></dl><p>Роль и отдел задаются сервером. Изменить их может администратор.</p><p>Отключение сохраняет автора, материалы и историю. При активных назначениях сначала потребуется переназначение.</p></aside></div>
+{{ ui.account_confirmation() }}</div>
 {% endblock %}

@@ -12,7 +12,7 @@ from sqlalchemy.orm import undefer
 from sqlalchemy.exc import SQLAlchemyError
 
 from .extensions import db
-from .models import Department, TASK_PRIORITIES, TASK_STATUSES, Task, TaskAttachment, TaskNotification, User
+from .models import Department, TASK_PRIORITIES, TASK_STATUSES, Task, TaskAttachment, TaskComment, TaskNotification, User
 from .notifications import (notification_text, visible_notifications_query,
     notification_read_boundary, mark_all_notifications_read)
 from .i18n import t
@@ -214,10 +214,12 @@ def _list_context(direction):
     moment = _now()
     view = "list" if request.args.get("view") == "list" else "board"
     board_data = {}
+    card_counts = {}
     groups = []
     if view == "board":
         projection = load_board_projection(ordered, direction, _available_task_actions)
         tasks, pagination, groups = projection.tasks, projection.pagination, projection.groups
+        card_counts = projection.card_counts
         # Match the groups and current tab to the same materialized SQL result,
         # even if another request changed a task since the earlier tab counts.
         if not completed_scope:
@@ -240,11 +242,19 @@ def _list_context(direction):
             page=min(max(1, request.args.get("page", 1, type=int)), max(1, (list_total + 24) // 25)),
             per_page=25, error_out=False)
         tasks = pagination.items
+        # Aggregate only this authorized page; never load discussions/files per card.
+        card_counts = {task.id: dict(comments=0, attachments=0) for task in tasks}
+        if card_counts:
+            for model, field in ((TaskComment, "comments"), (TaskAttachment, "attachments")):
+                rows = db.session.query(model.task_id, func.count(model.id)).filter(
+                    model.task_id.in_(list(card_counts))).group_by(model.task_id).all()
+                for task_id, count in rows:
+                    card_counts[task_id][field] = count
     columns = ["completed", "cancelled", "rejected"] if direction == "completed" else ["new", "in_progress"]
     context = dict(tasks=tasks, direction=direction, pagination=pagination,
         list_labels=({"received": "Полученные поручения", "sent": "Отправленные поручения", "completed": "Завершённые"}
                      if current_user.role == "admin" else LIST_LABELS), list_endpoints=LIST_ENDPOINTS,
-        view=view, board_data=board_data, board_columns=columns, board_groups=groups,
+        view=view, board_data=board_data, card_counts=card_counts, board_columns=columns, board_groups=groups,
         upload_policy=_detail_upload_policy() if view == "board" else None,
         counts=counts, completed_scope=completed_scope,
         may_create=can_create_task(current_user),
