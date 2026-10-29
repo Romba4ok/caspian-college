@@ -28,23 +28,3 @@
     <div class="actions"><button type="button" id="board-keep">Продолжить редактирование</button><button type="button" class="secondary-button" id="board-discard-confirm">Закрыть без сохранения</button></div>
   </div>
 </dialog>
-
-<div id="task-panel-dialog" class="task-panel-dialog" aria-labelledby="task-panel-heading" hidden>
-  <header class="task-panel-header">
-    <h2 id="task-panel-heading">Просмотр задачи</h2>
-    <button type="button" class="secondary-button" id="task-panel-close" autofocus>Закрыть</button>
-  </header>
-  <nav class="task-panel-navigation" aria-label="Просмотр задач доски">
-    <button type="button" class="secondary-button" id="task-panel-prev">Предыдущая задача</button>
-    <button type="button" class="secondary-button" id="task-panel-next">Следующая задача</button>
-  </nav>
-  <div class="task-panel-body">
-    <p id="task-panel-status" role="status" aria-live="polite" aria-atomic="true"></p>
-    <div id="task-panel-content"></div>
-    <div class="task-panel-recovery" id="task-panel-recovery" hidden>
-      <button type="button" id="task-panel-retry">Повторить загрузку</button>
-      <a id="task-panel-fallback" class="button secondary-button">Открыть полную страницу</a>
-    </div>
-  </div>
-</div>
-<script src="{{ url_for('static', filename='task-panel.js') }}" defer></script>

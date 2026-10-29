@@ -180,12 +180,12 @@ class TaskPanelTests(PortalCase):
             html=self.client.get(path).get_data(as_text=True)
             self.assertIn('дата и время неизвестны (историческая запись)',html)
 
-    def test_board_keeps_ordinary_links_and_only_one_preview_shell(self):
+    def test_board_keeps_full_page_links_without_sidebar_or_preview_script(self):
         task_id=self.sent();self.as_user('receiver-head')
         response=self.client.get('/tasks/received?view=board');html=response.get_data(as_text=True)
         self.assertIn(f'href="/tasks/{task_id}"',html)
-        self.assertEqual(1,html.count('id="task-panel-dialog"'))
-        self.assertIn('task-panel.js',html)
+        self.assertNotIn('id="task-panel-dialog"',html)
+        self.assertNotIn('task-panel.js',html)
         self.assertNotIn('Полное описание',html)
         listing=self.client.get('/tasks/received?view=list').get_data(as_text=True)
         self.assertNotIn('task-panel-dialog',listing)
