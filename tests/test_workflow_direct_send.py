@@ -71,14 +71,14 @@ class DirectSendTests(PortalCase):
         for name in ("employee", "head"):
             client = self.client_for(name)
             form = self.creation_form(client=client, title="  Документы  ", description="  Полный текст  ",
-                priority="urgent", category_id=str(self.category_id), contact_person="  Анна  ")
+                priority="urgent")
             ident = self.assert_sent(self.post(form, client=client))
             with self.app.app_context():
                 task = db.session.get(Task, ident)
                 self.assertEqual(("new", 1, None, False, 0), (task.status, task.revision, task.assignee_id, task.is_rework, task.rework_cycle))
                 self.assertEqual(self.ids[name], task.author_id)
                 self.assertEqual(self.department_id, task.sender_department_id)
-                self.assertEqual(("Документы", "Полный текст", "Документы", "Анна"), (task.title, task.description, task.category, task.contact_person))
+                self.assertEqual(("Документы", "Полный текст", None, None), (task.title, task.description, task.category, task.contact_person))
                 self.assertIsNotNone(task.sent_at)
                 self.assertEqual(7, task.due_at.hour)  # 12:00 in Asia/Qyzylorda.
                 event = TaskEvent.query.filter_by(task_id=ident).one()
@@ -164,7 +164,7 @@ class DirectSendTests(PortalCase):
     def test_forged_extra_duplicate_fields_and_file_field_are_rejected(self):
         form = self.creation_form()
         for field in ("author_id", "sender_department_id", "assignee_id", "status", "revision", "category",
-                      "sent_at", "legacy_missing_due", "is_legacy_dispatched", "is_rework", "rework_cycle"):
+                      "sent_at", "legacy_missing_due", "is_legacy_dispatched", "is_rework", "rework_cycle", "category_id", "contact_person"):
             self.assertEqual(400, self.post(form | {field:"1"}).status_code, field)
         data = MultiDict(form)
         data.add("creation_key", form["creation_key"])
@@ -173,10 +173,9 @@ class DirectSendTests(PortalCase):
         with self.app.app_context():
             self.assertEqual(0, Task.query.count())
 
-    def test_archived_source_destination_and_category_are_rechecked(self):
-        form = self.creation_form(category_id=str(self.category_id))
-        for model, ident, field, expected in ((TaskCategory, self.category_id, "is_archived", 400),
-            (Department, self.other_department_id, "is_archived", 400),
+    def test_archived_source_and_destination_are_rechecked(self):
+        form = self.creation_form()
+        for model, ident, field, expected in ((Department, self.other_department_id, "is_archived", 400),
             (Department, self.department_id, "is_archived", 403)):
             with self.app.app_context():
                 row = db.session.get(model, ident)
@@ -270,7 +269,7 @@ class DirectSendTests(PortalCase):
             self.assertEqual("image/png", TaskAttachment.query.one().content_type)
 
     def test_normalized_replay_preserves_original_snapshot(self):
-        form = self.creation_form(title="  Нормализация  ", description="  Описание  ", category_id=str(self.category_id))
+        form = self.creation_form(title="  Нормализация  ", description="  Описание  ")
         ident = self.assert_sent(self.post(form))
         with self.app.app_context():
             db.session.get(TaskCategory, self.category_id).name = "Другое название"

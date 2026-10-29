@@ -380,22 +380,21 @@ def _creation_payload():
     return dict(recipient_department_id=request.form.get("recipient_department_id"),
         title=request.form.get("title"), description=request.form.get("description"),
         due_at=_parse_form_deadline(request.form.get("due_at", "")),
-        priority=request.form.get("priority", "normal"), category_id=request.form.get("category_id"),
-        contact_person=request.form.get("contact_person"), creation_key=request.form.get("creation_key"))
+        priority=request.form.get("priority", "normal"), creation_key=request.form.get("creation_key"))
 
 
 CREATE_FIELDS = {"csrf_token", "title", "description", "recipient_department_id",
-                 "due_at", "priority", "category_id", "contact_person", "creation_key"}
+                 "due_at", "priority", "creation_key"}
 
 
 def _render_creation(error=None):
-    from .settings import active_categories, UploadPolicy
+    from .settings import UploadPolicy
     policy = UploadPolicy()
     key = request.form.get("creation_key") if request.method == "POST" else None
     if key is None or getattr(error, "field", None) == "creation_key":
         key = make_creation_key(current_user)
     return render_template("tasks/form.html", task=None, departments=_departments_for_form(),
-        categories=active_categories(), priority_labels=PRIORITY_LABELS, upload_policy=policy,
+        priority_labels=PRIORITY_LABELS, upload_policy=policy,
         creation_key=key, form_error=str(error) if error else None, error_field=_action_error_field(error))
 
 

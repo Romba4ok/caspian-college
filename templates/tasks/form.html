@@ -43,18 +43,6 @@
         {{ error_for('due_at') }}
       </label>
     </div>
-    <div class="task-form-grid">
-      <label for="category_id">Категория <span class="hint">Необязательно</span>
-        <select id="category_id" name="category_id" {% if form_error and error_field == "category_id" %}aria-invalid="true" aria-describedby="category_id-error"{% endif %}>
-          <option value="">Без категории</option>
-          {% for category in categories %}<option value="{{ category.id }}" {% if request.form.get('category_id', '') == category.id|string %}selected{% endif %}>{{ category.name }}</option>{% endfor %}
-        </select>{{ error_for('category_id') }}
-      </label>
-      <label for="contact_person">Контактное лицо <span class="hint">Необязательно</span>
-        <input id="contact_person" name="contact_person" maxlength="160" {% if form_error and error_field == "contact_person" %}aria-invalid="true" aria-describedby="contact_person-error"{% endif %} value="{{ request.form.get('contact_person', '') }}">
-        {{ error_for('contact_person') }}
-      </label>
-    </div>
     <p class="hint">Начальник получателя назначит исполнителя, либо сотрудник отдела сам возьмёт свободную задачу.</p>
 
     {% if upload_policy and upload_policy.allowed_extensions %}

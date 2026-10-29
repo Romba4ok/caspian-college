@@ -48,9 +48,13 @@ class TaskPanelTests(PortalCase):
         self.as_user('receiver-head')
         panel=self.panel(task_id).get_data(as_text=True)
         full=self.client.get(f'/tasks/{task_id}').get_data(as_text=True)
-        for text in ['Проверить весь комплект','Полное описание\nВторая строка','Контактное лицо отдела',
-            'Отчётность','Проверяем комплектность','Работа начата','Сотрудник','worker','Создана','Поручение отправлено другому отделу:']:
+        for text in ['Проверить весь комплект','Полное описание\nВторая строка',
+            'Проверяем комплектность','Работа начата','Сотрудник','worker','Создана','Поручение отправлено другому отделу:']:
             self.assertIn(text,panel); self.assertIn(text,full)
+        for html in (panel,full):
+            facts=html.split('<dl class="task-facts">',1)[1].split('</dl>',1)[0]
+            for removed in ('Категория','Контактное лицо','Отчётность'):
+                self.assertNotIn(removed,facts)
         self.assertIn(f'href="/tasks/{task_id}#task-permitted-actions"',panel)
         self.assertIn('id="task-permitted-actions"',full)
         self.assertEqual(str(task_id),self.panel(task_id).headers['X-Task-Panel'])

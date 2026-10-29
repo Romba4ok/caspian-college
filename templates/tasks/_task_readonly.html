@@ -27,8 +27,6 @@
       <div><dt>Исполнители ({{ task.assignee_ids|length }})</dt><dd>{{ assignee_names(task) }}</dd></div>
       <div><dt>{{ t('Срок (') }}{{ config.TASK_TIMEZONE }})</dt><dd>{{ task.due_at|task_datetime }}</dd></div>
       <div><dt>Оставшееся время</dt><dd class="task-clock{% if deadline_state.overdue %} task-overdue{% endif %}">{{ deadline_state.text }}</dd></div>
-      <div><dt>{{ t('Категория') }}</dt><dd>{{ task.category or t('Не указана') }}</dd></div>
-      <div><dt>{{ t('Контактное лицо') }}</dt><dd>{{ task.contact_person or t('Не указано') }}</dd></div>
     </dl>
     <p class="hint">{{ t('Создана') }} {{ task.created_at|task_datetime }}</p>
     {% if was_sent %}<p class="hint">Поручение отправлено другому отделу: {{ task.sent_at|task_datetime if task.sent_at else 'точная дата неизвестна (историческая запись)' }}</p>{% endif %}

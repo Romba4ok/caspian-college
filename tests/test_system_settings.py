@@ -59,14 +59,21 @@ class SystemSettingsTests(PortalCase):
         before=self.snapshot();self.assertEqual(410,self.client.post("/admin/settings",data=dict(max_upload_mb="20",allowed_extensions=["exe"])).status_code)
         self.assertEqual(before,self.snapshot())
 
-    def test_archived_categories_not_offered_but_existing_category_stays_optional(self):
+    def test_categories_and_contact_are_removed_from_creation_and_rejected_without_side_effects(self):
         visible=self.category();archived=self.category("Архивная")
         with self.app.app_context():archive_category(actor=db.session.get(User,self.ids["root"]),category_id=archived);db.session.commit()
         client=self.app.test_client();self.login("employee",client=client)
         page=client.get("/tasks/new").get_data(as_text=True)
-        self.assertIn('name="category_id"',page);self.assertIn("Без категории",page);self.assertIn("Оборудование",page);self.assertNotIn("Архивная",page)
-        for category in (str(visible),""):
-            response=client.post("/tasks/new",data=self.creation_form(client=client,category_id=category));self.assertEqual(302,response.status_code)
+        for text in ('name="category_id"','name="contact_person"',"Без категории","Оборудование","Архивная","Контактное лицо"):
+            self.assertNotIn(text,page)
+        form=self.creation_form(client=client);before=self.snapshot()
+        for changes in ({"category_id":str(visible)},{"category_id":""},{"contact_person":"Контакт"},{"contact_person":""}):
+            response=client.post("/tasks/new",data=form|changes)
+            self.assertEqual(400,response.status_code);self.assertEqual(before,self.snapshot())
+            self.assertIn(form["creation_key"],response.get_data(as_text=True))
+        self.assertEqual(302,client.post("/tasks/new",data=form).status_code)
+        with self.app.app_context():
+            task=Task.query.one();self.assertIsNone(task.category_id);self.assertIsNone(task.category);self.assertIsNone(task.contact_person)
 
     def test_unknown_or_archived_category_cannot_be_submitted(self):
         archived=self.category()
@@ -80,7 +87,11 @@ class SystemSettingsTests(PortalCase):
         ident=self.category();task_id=self.task(category_id=ident,category="Оборудование")
         with self.app.app_context():rename_category(actor=db.session.get(User,self.ids["root"]),category_id=ident,name="Новое название");db.session.commit()
         before=self.snapshot();client=self.app.test_client();self.login("employee",client=client)
-        page=client.get(f"/tasks/{task_id}").get_data(as_text=True);self.assertIn("Оборудование",page)
+        for path in (f"/tasks/{task_id}",f"/tasks/{task_id}/panel"):
+            page=client.get(path).get_data(as_text=True)
+            self.assertNotIn("Оборудование",page);self.assertNotIn("Контактное лицо",page)
+        with self.app.app_context():
+            task=db.session.get(Task,task_id);self.assertEqual("Оборудование",task.category);self.assertEqual(ident,task.category_id)
         self.assertEqual(before,self.snapshot())
         audit=self.client.get("/admin/audit").get_data(as_text=True);self.assertIn("Новое название",audit);self.assertIn("Оборудование",audit)
 

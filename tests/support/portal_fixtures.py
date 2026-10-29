@@ -59,7 +59,7 @@ class PortalCase(unittest.TestCase):
     def draft_form(self, **changes):
         return dict(title="Подготовить документы", description="Нужны документы к встрече",
             recipient_department_id=str(self.other_department_id), due_at="2030-06-01T12:00",
-            priority="normal", category_id="", contact_person="") | changes
+            priority="normal") | changes
 
     def creation_form(self, *, client=None, **changes):
         """Issue an author-bound key through the actual new-task GET form."""
