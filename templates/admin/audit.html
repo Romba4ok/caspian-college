@@ -5,7 +5,7 @@
 {% block title %}Журнал действий · Caspian College{% endblock %}
 {% block content %}
 <div class="people-workspace audit-workspace" data-audit-root>
-<div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Журнал действий</h1><p>Задачи и административные изменения в общей хронологии</p></div><span class="badge audit-readonly">{{ icon('lock',16) }}Только просмотр</span></div>
+<div class="activity-hero audit-hero workspace-hero"><div class="activity-hero-copy"><span class="eyebrow">ИСТОРИЯ ПЛАТФОРМЫ</span><h1>Журнал действий</h1><p>Кто, когда и что изменил — в одной хронологии.</p></div><span class="activity-hero-symbol" aria-hidden="true">{{ icon('history',34) }}</span><span class="badge audit-readonly">{{ icon('lock',16) }}Только просмотр</span></div>
 <p class="audit-context">{{ icon('history',18) }}Имена, роли и отделы сохранены на момент события. Здесь также показаны действия начальников над сотрудниками и системные пояснения административных изменений.</p>
 {% if preview_mode|default(false) %}<p class="report-demo-note">Демонстрационные события · синтетические данные</p>{% endif %}
 {% set invalid_field=error_field|default('') %}
@@ -13,28 +13,35 @@
 {% set users=[] %}
 {% if journal %}{% for user in journal.users %}{% set _=users.append({'id':user.id,'name':user.name ~ ' · #' ~ user.id}) %}{% endfor %}
 {% elif filters.user_id %}{% set _=users.append({'id':filters.user_id,'name':'Выбранный ID: ' ~ filters.user_id}) %}{% endif %}
+<details class="card audit-filter-panel"{% if error or filters.user_id or filters.date_from or filters.date_to %} open{% endif %}>
+<summary class="audit-filter-heading"><span class="audit-filter-symbol" aria-hidden="true">{{ ui.task_symbol('calendar',21) }}</span><span class="audit-filter-copy"><strong>Найти события</strong><small>Инициатор и период</small></span></summary>
 <form method="get" action="{{ url_for('admin.admin_audit') }}" class="card audit-filters" aria-label="Фильтры журнала" data-ui-form>
 {{ forms.error_summary(field_errors,error if error and not field_errors else '') }}
 {% if preview_mode|default(false) %}<input type="hidden" name="role" value="{{ current_user.role }}">{% for key in ['audit_case','probe','nojs','motion'] %}{% if request.args.get(key) %}<input type="hidden" name="{{ key }}" value="{{ request.args[key] }}">{% endif %}{% endfor %}{% endif %}
+<div class="audit-filter-grid">
 {{ forms.select_field('user_id','Инициатор',users,value=filters.user_id,placeholder='Все инициаторы',error=field_errors.get('user_id','')) }}
 {{ forms.field('date_from','С даты',input_type='date',value=filters.date_from,error=field_errors.get('date_from','')) }}
 {{ forms.field('date_to','По дату включительно',input_type='date',value=filters.date_to,error=field_errors.get('date_to','')) }}
 <div class="audit-filter-actions">{{ forms.submit_button('Применить','Применяем…','arrow') }}<a class="button secondary-button" href="{{ url_for('admin.admin_audit') }}">Сбросить</a></div>
+</div>
 <p id="audit-period" class="hint audit-filter-note">{{ icon('info',16) }}Календарные дни Asia/Qyzylorda. Обе даты входят в период; можно указать только одну границу.</p>
 {% if error and invalid_field in ['date_from','date_to'] %}<p class="audit-filter-note hint">Переданное значение: {{ filters[invalid_field] }}</p>{% endif %}
 <span class="sr-only" role="status" data-form-pending aria-live="polite"></span>
 </form>
+</details>
 {% if journal %}
 <div class="audit-summary"><h2>Хронология <span class="audit-total">{{ journal.total }}</span></h2><p role="status">Найдено событий: {{ journal.total }} · Страница {{ journal.page }} из {{ journal.pages }}</p></div>
 {% if journal.entries %}<ol class="audit-timeline" aria-label="События от новых к старым">
 {% for event in journal.entries %}<li class="card audit-entry" data-event-source="{{ event.source }}" data-event-id="{{ event.id }}">
+<span class="audit-feed-icon" aria-hidden="true">{{ icon('file' if event.source=='task' else 'people',21) }}</span><div class="audit-entry-body"><div class="audit-entry-heading">
 <div class="audit-entry-meta"><span class="badge audit-source">{{ icon('file' if event.source=='task' else 'people',15) }}{{ 'Задачи' if event.source=='task' else 'Администрирование' }} · #{{ event.id }}</span><time datetime="{{ event.created_at.isoformat() }}">{{ event.created_at|task_datetime }} · Asia/Qyzylorda</time></div>
 <h3 class="audit-action">{{ event.action }}</h3>
+</div>
 <div class="audit-participants"><div class="audit-actor"><span class="audit-meta-label">Инициатор{% if event.actor_key %} · ID {{ event.actor_key }}{% endif %}</span><strong>{{ event.actor_name }}</strong><p>{{ event.actor_role }}{% if event.actor_department %} · {{ event.actor_department }}{% endif %}</p></div><div class="audit-object"><span class="audit-meta-label">Объект</span>{% if event.task_id %}<a href="{{ url_for('tasks.task_detail',task_id=event.task_id) }}">Задача #{{ event.task_id }}{{ icon('arrow',16) }}</a>{% else %}<strong>{{ event.object_label }}{% if event.object_id is not none %} #{{ event.object_id }}{% endif %}</strong>{% endif %}</div></div>
 {% if event.comment %}<div class="audit-comment"><h4>Пояснение события</h4><p>{{ event.comment }}</p></div>{% endif %}
 {% if event.changes %}<details class="audit-changes"><summary>Изменённые значения <span class="audit-change-count">{{ event.changes|length }}</span><span class="sr-only"> · {{ event.action }}, {{ event.created_at|task_datetime }}, {{ 'задачи' if event.source=='task' else 'администрирование' }} #{{ event.id }}</span></summary><dl>
-{% for label,before,after in event.changes %}<div class="audit-change"><dt>{{ label }}</dt><dd><span>Было</span><p>{{ before }}</p></dd><dd><span>Стало</span><p>{{ after }}</p></dd></div>{% endfor %}</dl></details>{% endif %}
-</li>{% endfor %}</ol>
+{% for label,before,after in event.changes %}<div class="audit-change"><dt>{{ label }}</dt><dd class="audit-before"><span>Было</span><p>{{ before }}</p></dd><dd class="audit-after"><span>Стало</span><p>{{ after }}</p></dd></div>{% endfor %}</dl></details>{% endif %}
+</div></li>{% endfor %}</ol>
 {% else %}<div class="card audit-empty">{{ ui.empty_state('Событий не найдено','Измените период или инициатора. «Сбросить» вернёт полную хронологию.') }}</div>{% endif %}
 {% if journal.pages>1 %}<nav class="pagination audit-pagination" aria-label="Страницы журнала">{% if journal.page>1 %}<a class="button secondary-button" rel="prev" href="{{ url_for('admin.admin_audit',page=journal.page-1,**filters) }}">Назад</a>{% endif %}<span aria-current="page">Страница {{ journal.page }} из {{ journal.pages }}</span>{% if journal.page<journal.pages %}<a class="button secondary-button" rel="next" href="{{ url_for('admin.admin_audit',page=journal.page+1,**filters) }}">Далее</a>{% endif %}</nav>{% endif %}
 {% endif %}

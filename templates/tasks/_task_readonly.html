@@ -19,7 +19,8 @@
 {%- endmacro %}
 {% macro overview(panel=false) -%}
 <section class="card reading-overview">
-{{ heading('Описание', panel) }}<div class="task-description">{{ task.description }}</div>
+<div class="reading-section-heading"><span class="reading-section-icon" aria-hidden="true">{{ icon('file',20) }}</span>{{ heading('Описание', panel) }}</div><div class="task-description">{{ task.description }}</div>
+<div class="reading-details-heading">Сведения о задаче</div>
 <div class="reading-facts"><dl class="task-facts">
 {{ ui.task_fact('Отдел-заказчик', task.sender_department.name, 'building') }}
 {{ ui.task_fact('Исполняющий отдел', task.recipient_department.name, 'building') }}

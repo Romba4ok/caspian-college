@@ -28,7 +28,7 @@
     toggle.setAttribute("aria-expanded", String(open));
     navigation?.classList.toggle("is-open", open);
   });
-  const mobile = window.matchMedia("(max-width:1359px)");
+  const mobile = window.matchMedia("(max-width:1023px)");
   mobile.addEventListener("change", () => closeNavigation(mobile.matches && navigation?.contains(document.activeElement)));
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;

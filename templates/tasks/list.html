@@ -4,27 +4,23 @@
 {% block title %}{{ list_labels[direction] }} · Платформа отделов{% endblock %}
 {% block main_class %}task-workspace{% if view == 'board' %} task-board-workspace{% endif %}{% endblock %}
 {% block content %}
-<div class="page-heading task-page-heading">
-  <div class="task-heading-title"><span class="department-context">{{ icon('building',18) }}{{ 'Все отделы · Просмотр администратора' if current_user.role == 'admin' else current_user.department.name }}</span><h1>Задачи</h1></div>
+<div class="page-heading task-page-heading workspace-hero">
+  <div class="task-heading-title"><div class="task-heading-copy"><span class="task-heading-kicker">Управление поручениями</span><h1>Задачи</h1></div><span class="department-context">{{ icon('building',18) }}{{ 'Все отделы · Просмотр администратора' if current_user.role == 'admin' else current_user.department.name }}</span></div>
   {% if may_create %}<a class="button task-create" href="{{ url_for('tasks.task_new') }}">{{ ui.task_symbol('plus') }}Новая задача</a>{% endif %}
 </div>
 {% if current_user.role != 'admin' and current_user.department.is_archived %}<p class="task-notice">Отдел в архиве. Доступные операции определяются текущими правами.</p>{% endif %}
-<div class="task-navigation">
+<div class="task-navigation" data-task-view="{{ view }}" data-user-id="{{ current_user.id }}" data-direction="{{ direction }}">
   <nav class="task-tabs" aria-label="Разделы задач">
   {% for key in ['received','sent','completed'] %}
-    <a href="{{ url_for(list_endpoints[key], view=view, scope=completed_scope) }}"{% if direction == key %} aria-current="page"{% endif %}><span>{{ list_labels[key] if current_user.role == 'admin' else {'received':'Нашему отделу','sent':'Другим отделам','completed':'Завершённые'}[key] }}</span><span class="task-tab-count" aria-label="Всего задач: {{ counts[key] }}">{{ counts[key] }}</span></a>
+    <a href="{{ url_for(list_endpoints[key], view='board', scope=completed_scope) }}"{% if direction == key %} aria-current="page"{% endif %}><span>{{ list_labels[key] if current_user.role == 'admin' else {'received':'Нашему отделу','sent':'Другим отделам','completed':'Завершённые'}[key] }}</span><span class="task-tab-count" aria-label="Всего задач: {{ counts[key] }}">{{ counts[key] }}</span></a>
   {% endfor %}
-  </nav>
-  <nav class="task-view-switch" aria-label="Вид задач" data-task-view="{{ view }}" data-user-id="{{ current_user.id }}" data-direction="{{ direction }}">
-    <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='list', scope=completed_scope, page=1) }}"{% if view == 'list' %} aria-current="page"{% endif %}>{{ icon('tasks',18) }}Список</a>
-    <a class="button secondary-button" href="{{ url_for(list_endpoints[direction], view='board', scope=completed_scope) }}"{% if view == 'board' %} aria-current="page"{% endif %}>{{ ui.task_symbol('board') }}Доска</a>
   </nav>
 </div>
 {% if direction == 'completed' %}<p class="hint">Разрешённый возврат на доработку доступен на полной странице выполненной задачи.</p>{% endif %}
 {% if direction == 'completed' and completed_scope %}
 <nav class="completed-direction-switch" aria-label="Направление завершённых задач">
-  <a href="{{ url_for(list_endpoints[direction], scope='received', view=view) }}"{% if completed_scope == 'received' %} aria-current="page"{% endif %}>Нашему отделу</a>
-  <a href="{{ url_for(list_endpoints[direction], scope='sent', view=view) }}"{% if completed_scope == 'sent' %} aria-current="page"{% endif %}>Другим отделам</a>
+  <a href="{{ url_for(list_endpoints[direction], scope='received', view='board') }}"{% if completed_scope == 'received' %} aria-current="page"{% endif %}>Нашему отделу</a>
+  <a href="{{ url_for(list_endpoints[direction], scope='sent', view='board') }}"{% if completed_scope == 'sent' %} aria-current="page"{% endif %}>Другим отделам</a>
 </nav>
 {% endif %}
 <div class="task-list-heading">

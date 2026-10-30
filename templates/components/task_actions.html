@@ -43,7 +43,7 @@
 {% if ns.actions %}
 {% set state=dict(id=task.id,title=task.title,revision=task.revision,status=task.status,group=task.status,actions=ns.actions,candidates=ns.candidates,assignee_ids=task.assignee_ids,detail_url=url_for('tasks.task_detail',task_id=task.id),due_at=(task.due_at|task_datetime('%Y-%m-%dT%H:%M')) if task.due_at else '') %}
 <section class="card task-full-actions" id="task-permitted-actions" data-task-id="{{ task.id }}" data-board-task="{{ state|tojson|forceescape }}">
-<h2>Действия и обсуждение</h2>
+<div class="reading-section-heading"><span class="reading-section-icon" aria-hidden="true">{{ icon('tasks',20) }}</span><h2>Действия и обсуждение</h2></div>
 <div class="task-action-links">{% for action in ns.actions %}<a class="button {{ 'secondary-button' if action.key in ['comment','upload','deadline'] else '' }}" data-board-action="{{ action.key }}" href="#native-action-{{ action.key }}">{{ action.label }}</a>{% endfor %}</div>
 <div class="task-native-forms">
 {% for action in ns.actions %}

@@ -15,11 +15,10 @@
 <a class="button secondary-button reading-back" href="{{ url_for(origin_endpoint,view=origin_view,scope=origin_scope,page=(origin_page if origin_page>0 else 1) if origin_view=='list' else none) if 'origin_section' in request.args else url_for(back_endpoint,scope=back_scope) }}"><span class="back-arrow">{{ icon('arrow',17) }}</span>К задачам</a>
 <p id="board-feedback" class="task-notice" role="status" aria-live="polite" tabindex="-1" hidden></p><button id="board-retry" type="button" hidden>Повторить обновление</button>
 <article class="task-reading task-full" data-task-id="{{ task.id }}" data-full-action-root data-user-id="{{ current_user.id }}" data-csrf-token="{{ csrf_token() }}" data-refresh-url="{{ url_for('tasks.task_detail',task_id=task.id) }}">
-<header class="reading-title"><p class="reading-eyebrow">ЗАДАЧА №{{ task.id }}</p><h1>{{ task.title }}</h1>{{ read.badges() }}</header>
+<header class="reading-title workspace-hero"><div class="reading-title-reference"><p class="reading-eyebrow">ЗАДАЧА №{{ task.id }}</p>{{ read.badges() }}</div><h1>{{ task.title }}</h1></header>
 {{ read.notices() }}
 {% if action_error %}<div class="flash error message message-error" role="alert" data-error-field="{{ action_error_field|default('') }}"><p>{{ action_error }}</p></div>{% endif %}
-{{ actions.full_controls() }}
-<div class="task-reading-layout"><div class="task-reading-main">{{ read.overview() }}{{ read.comments() }}</div><aside class="task-reading-side" aria-label="Материалы и история">{{ read.attachments() }}{{ read.history() }}</aside></div>
+<div class="task-reading-layout"><div class="task-reading-main">{{ read.overview() }}{{ actions.full_controls() }}{{ read.comments() }}</div><aside class="task-reading-side" aria-label="Материалы и история">{{ read.attachments() }}{{ read.history() }}</aside></div>
 </article>
 {% if task_actions or may_contribute %}{{ actions.dialog(upload_policy,url_for('tasks.task_detail',task_id=task.id)) }}<script src="{{ url_for('static',filename='tasks.js') }}" defer></script>{% endif %}
 {% endblock %}

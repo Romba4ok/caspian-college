@@ -6,7 +6,7 @@
 {% block title %}{{ 'Изменить пользователя' if editing else 'Новый пользователь' }} · Caspian College{% endblock %}
 {% block content %}
 <div class="people-workspace"><a class="people-back" data-account-cancel href="{{ url_for('admin.admin_users') }}">← К пользователям</a>
-<div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>{{ 'Изменить пользователя' if editing else 'Новый пользователь' }}</h1><p>Данные, роль и отдел учётной записи</p></div></div>
+<div class="people-heading workspace-hero"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>{{ 'Изменить пользователя' if editing else 'Новый пользователь' }}</h1><p>Данные, роль и отдел учётной записи</p></div></div>
 <div class="account-layout"><section class="card account-form-card"><h2>Данные учётной записи</h2>
 <form method="post" action="{{ url_for('admin.admin_user_edit',user_id=account_user.id) if editing else url_for('admin.admin_user_new') }}" data-ui-form data-account-form data-account-unsaved="{{ 'true' if request.method == 'POST' else 'false' }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

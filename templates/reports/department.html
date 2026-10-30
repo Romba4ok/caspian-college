@@ -4,17 +4,22 @@
 {% block title %}Отчёт отдела · Caspian College{% endblock %}
 {% block content %}
 <div class="people-workspace reports-workspace" data-report-root="department">
-<div class="people-heading"><div><span class="eyebrow">ОТЧЁТ НАЧАЛЬНИКА</span><h1>Отчёт отдела</h1><p class="report-department-name">{{ report.department.name }}</p></div>{{ ui.link_button('К задачам',url_for('tasks.received_tasks'),symbol='arrow') }}</div>
+<div class="people-heading workspace-hero"><div><span class="eyebrow">ОТЧЁТ НАЧАЛЬНИКА</span><h1>Отчёт отдела</h1><p class="report-department-name">{{ report.department.name }}</p></div>{{ ui.link_button('К задачам',url_for('tasks.received_tasks'),symbol='arrow') }}</div>
 <div class="report-snapshot"><p>{{ icon('clock',16) }}По состоянию на <time datetime="{{ report.generated_at.isoformat() }}">{{ report.generated_at|task_datetime }}</time> · {{ config.get('TASK_TIMEZONE','Asia/Qyzylorda') }}</p>{% if preview_mode|default(false) %}<span class="report-demo-label">Демонстрационные показатели</span>{% endif %}</div>
 {% if report.department.archived %}{{ ui.message('Отдел в архиве. Прежние поручения и результаты сохранены в отчёте.') }}{% endif %}
+{{ ui.report_spotlight(report.overall) }}
 <div class="report-kpis" aria-label="Показатели отдела">
 {{ ui.report_metric('Всего задач отдела',report.overall.total,'Каждое поручение учитывается один раз') }}
+{{ ui.report_metric('Выполнено',report.overall.statuses.completed,'Задачи, которые сейчас имеют статус «Выполнено»') }}
 {{ ui.report_metric('Входящие / исходящие',report.incoming.total|string ~ ' / ' ~ report.outgoing.total|string,'Полученные и отправленные поручения') }}
-{{ ui.report_metric('Активные просроченные',report.overall.overdue,'Входящие: ' ~ report.incoming.overdue ~ ' · Исходящие: ' ~ report.outgoing.overdue) }}
 </div>
 {% if not report.overall.total %}{{ ui.empty_state('Задач пока нет','Показатели появятся после отправки поручений вашего отдела.') }}{% endif %}
-<div class="report-main-grid"><section class="card report-section" aria-labelledby="report-statuses"><div class="report-section-heading"><h2 id="report-statuses">Задачи по статусам</h2><p>Входящие — поступившие в отдел; исходящие — отправленные вашим отделом.</p></div>{{ ui.report_status_table(report.incoming,report.outgoing,status_labels,'Количество поручений по направлениям') }}</section>
-<section class="card report-section report-averages" aria-labelledby="report-duration"><h2 id="report-duration">Среднее время выполнения</h2><p class="report-section-description">От отправки до последнего выполнения. Только сейчас выполненные задачи.</p>{{ ui.report_average(report.overall,'По отделу','overall',report.overall.average_hours|report_hours) }}<div class="report-direction-averages">{{ ui.report_average(report.incoming,'Входящие','incoming',report.incoming.average_hours|report_hours) }}{{ ui.report_average(report.outgoing,'Исходящие','outgoing',report.outgoing.average_hours|report_hours) }}</div></section></div>
+<div class="report-overview-grid">
+<section class="card report-section" aria-labelledby="report-statuses"><div class="report-section-heading"><h2 id="report-statuses">Распределение задач</h2><p>Текущий статус каждого поручения отдела.</p></div>{{ ui.report_distribution(report.overall,status_labels) }}</section>
+<section class="card report-section report-direction-comparison" aria-labelledby="report-directions"><div class="report-section-heading"><h2 id="report-directions">Входящие и исходящие</h2><p>Две стороны работы вашего отдела.</p></div>{% set direction_max = [report.incoming.total,report.outgoing.total]|max %}{{ ui.report_direction(report.incoming,'Входящие','Поручения, которые получил ваш отдел',direction_max,'incoming') }}{{ ui.report_direction(report.outgoing,'Исходящие','Поручения, отправленные другим отделам',direction_max,'outgoing') }}</section>
+</div>
+<section class="card report-section report-averages report-averages-full" aria-labelledby="report-duration"><div class="report-section-heading"><h2 id="report-duration">Сколько времени занимает выполнение?</h2><p class="report-section-description">Среднее время выполнения — от отправки до последнего выполнения. Считаем только задачи, которые сейчас выполнены.</p></div>{{ ui.report_average(report.overall,'По отделу','overall',report.overall.average_hours|report_hours) }}<div class="report-direction-averages">{{ ui.report_average(report.incoming,'Входящие','incoming',report.incoming.average_hours|report_hours) }}{{ ui.report_average(report.outgoing,'Исходящие','outgoing',report.outgoing.average_hours|report_hours) }}</div></section>
+<details class="card report-detail-figures"><summary>Подробные цифры по направлениям</summary>{{ ui.report_status_table(report.incoming,report.outgoing,status_labels,'Количество поручений по направлениям') }}</details>
 {{ ui.report_method() }}
 </div>
 {% endblock %}

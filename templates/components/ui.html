@@ -60,11 +60,32 @@
 {%- endmacro %}
 
 {% macro report_average(data,label,identifier,formatted) -%}
-<div class="report-average-group" data-report-average="{{ identifier }}"><h3>{{ label }}</h3><p class="report-average">{{ formatted }}</p><dl class="report-average-counts"><div><dt>Учтено выполненных</dt><dd>{{ data.included }}</dd></div><div><dt>Исключено завершённых</dt><dd>{{ data.excluded }}</dd></div></dl></div>
+<div class="report-average-group" data-report-average="{{ identifier }}"><h3>{{ label }}</h3><p class="report-average">{{ formatted }}</p>{% if data.average_hours is none %}<p class="report-average-note">Нет выполненных задач с подходящими датами.</p>{% endif %}<dl class="report-average-counts"><div><dt>Учтено выполненных</dt><dd>{{ data.included }}</dd></div><div><dt>Исключено завершённых</dt><dd>{{ data.excluded }}</dd></div></dl></div>
 {%- endmacro %}
 
 {% macro report_method() -%}
-<section class="card report-method"><h2>Как читать среднее</h2><p>Календарные часы от фактической отправки до последнего выполнения только сейчас выполненных задач. Выходные и нерабочее время входят в длительность.</p><p>Возвращённая на доработку задача не участвует до повторного выполнения. Отменённые, отклонённые и незавершённые задачи также не участвуют.</p><p>Выполненные задачи без достоверных дат, с выполнением раньше отправки или датами из будущего исключены. «Нет данных» означает отсутствие подходящих записей; нулевое значение — действительный нулевой интервал.</p></section>
+<details class="card report-method"><summary>Как читать среднее</summary><div class="report-method-body"><p>Календарные часы от фактической отправки до последнего выполнения только сейчас выполненных задач. Выходные и нерабочее время входят в длительность.</p><p>Возвращённая на доработку задача не участвует до повторного выполнения. Отменённые, отклонённые и незавершённые задачи также не участвуют.</p><p>Выполненные задачи без достоверных дат, с выполнением раньше отправки или датами из будущего исключены. «Нет данных» означает отсутствие подходящих записей; нулевое значение — действительный нулевой интервал.</p></div></details>
+{%- endmacro %}
+
+{% macro report_spotlight(data) -%}
+{% set active = data.statuses.new + data.statuses.in_progress %}
+<section class="report-spotlight" aria-label="Работа сейчас">
+<div class="report-spotlight-main"><h2 class="report-spotlight-label">Работа сейчас</h2><div class="report-spotlight-value"><strong>{{ active }}</strong><span>Активные задачи</span></div><p class="report-spotlight-note">Новые: {{ data.statuses.new }} <span aria-hidden="true">·</span> В работе: {{ data.statuses.in_progress }}</p></div>
+<div class="report-spotlight-overdue"><span class="report-spotlight-overdue-icon" aria-hidden="true">{{ icon('clock',24) }}</span><div><span>Активные просроченные</span><strong>{{ data.overdue }}</strong><p>Из числа активных задач.<br>Срок уже истёк, задача ещё не закрыта.</p></div></div>
+</section>
+{%- endmacro %}
+
+{% macro report_distribution(data,labels) -%}
+{% set denominator = data.total if data.total > 0 else 1 %}
+<div class="report-status-chart" data-chart-total="{{ data.total }}">
+<div class="report-donut{% if not data.total %} report-donut-empty{% endif %}" style="--seg-new:{{ (data.statuses.new / denominator * 100)|round(4) }}%;--seg-progress:{{ (data.statuses.in_progress / denominator * 100)|round(4) }}%;--seg-completed:{{ (data.statuses.completed / denominator * 100)|round(4) }}%;--seg-cancelled:{{ (data.statuses.cancelled / denominator * 100)|round(4) }}%;--seg-rejected:{{ (data.statuses.rejected / denominator * 100)|round(4) }}%;" aria-hidden="true"><div class="report-donut-center"><strong>{{ data.total }}</strong><span>всего задач</span></div></div>
+<ul class="report-status-legend" aria-label="Количество и доля задач каждого статуса">{% for key,label in labels.items() %}<li data-chart-status="{{ key }}" data-count="{{ data.statuses[key] }}"><span class="report-status-key"><i class="report-status-dot status-{{ key }}" aria-hidden="true"></i><span>{{ label }}</span></span><strong>{{ data.statuses[key] }}</strong><small>{{ (data.statuses[key] / denominator * 100)|round(1)|string|replace('.',',') }}%</small></li>{% endfor %}</ul>
+</div>
+{%- endmacro %}
+
+{% macro report_direction(data,label,meaning,maximum,direction) -%}
+{% set active = data.statuses.new + data.statuses.in_progress %}
+<div class="report-direction-row report-direction-{{ direction }}" data-chart-direction="{{ direction }}"><div class="report-direction-heading"><h3>{{ label }}</h3><strong>{{ data.total }}</strong></div><p class="report-direction-meaning">{{ meaning }}</p><div class="report-bar-track" aria-hidden="true"><span class="report-bar-fill" style="--bar-size:{{ (data.total / maximum * 100)|round(4) if maximum > 0 else 0 }}%"></span></div><p class="report-direction-context"><span>Активных: <strong>{{ active }}</strong></span><span>Просрочено: <strong>{{ data.overdue }}</strong></span></p></div>
 {%- endmacro %}
 
 {% macro task_symbol(name, size=18) -%}
@@ -96,25 +117,30 @@
 {% set url = card.detail_url if card else detail_url %}
 {% set url = url ~ ('&' if '?' in url else '?') ~ 'origin_section=' ~ (direction|urlencode) ~ '&origin_view=' ~ (layout|urlencode) ~ '&origin_scope=' ~ (request.args.get('scope','received')|urlencode) ~ '&origin_page=' ~ (request.args.get('page','1')|urlencode) %}
 <article class="{{ 'board-card' if layout == 'board' else 'card task-card' }}{% if overdue %} task-card-overdue{% endif %}" data-task-id="{{ task.id }}"{% if layout == 'board' %} data-board-task="{{ card|tojson|forceescape }}"{% endif %}>
-  <div class="board-card-meta">{{ status_badge(task.status) }}<span class="card-priority"><span class="sr-only">Приоритет: </span>{{ priority_badge(task.priority) }}</span>{% if task.is_rework %}<span class="badge task-rework">{{ icon('history',14) }}На доработке</span>{% endif %}{% if overdue %}<span class="badge task-late">{{ icon('alert',14) }}Просрочена</span>{% endif %}</div>
-  {% if layout == 'board' %}<h4><a href="{{ url }}">{{ task.title }}</a></h4>{% else %}<h2><a href="{{ url }}">{{ task.title }}</a></h2><p class="task-card-summary">{{ task.description }}</p>{% endif %}
+  <div class="card-reference"><a class="task-number" href="{{ card.detail_url if card else detail_url }}" aria-label="Постоянная ссылка на задачу №{{ task.id }}">№{{ task.id }}</a><span class="card-priority"><span class="sr-only">Приоритет: </span>{{ priority_badge(task.priority) }}</span></div>
+  <div class="card-heading">
+  {% if layout == 'board' %}<h4 class="task-card-title"><a href="{{ url }}">{{ task.title }}</a></h4>{% else %}<h2 class="task-card-title"><a href="{{ url }}">{{ task.title }}</a></h2><p class="task-card-summary">{{ task.description }}</p>{% endif %}
   {% if layout == 'list' or not active %}{{ task_process(task) }}{% endif %}
-  <dl class="task-facts">
+  </div>
+  <div class="board-card-meta">{{ status_badge(task.status) }}{% if task.is_rework %}<span class="badge task-rework">{{ icon('history',14) }}На доработке</span>{% endif %}{% if overdue %}<span class="badge task-late">{{ icon('alert',14) }}Просрочена</span>{% endif %}</div>
+  <dl class="task-facts card-assignees">
     {% if user.role == 'admin' or direction == 'completed' %}
     {{ task_fact('Отдел-заказчик', task.sender_department.name, 'building') }}
     {{ task_fact('Исполняющий отдел', task.recipient_department.name, 'building') }}
     {% else %}{{ task_fact('Поручение от' if direction == 'received' else 'Поручение для', task.sender_department.name if direction == 'received' else task.recipient_department.name, 'building') }}{% endif %}
     {{ task_fact('Исполнители (' ~ (task.assignee_ids|length) ~ ')', task_assignees(task), 'people') }}
-    <div class="task-fact"><dt>{{ task_symbol('calendar') }}<span>Срок</span></dt><dd>{% if task.due_at %}<time datetime="{{ task.due_at.isoformat() }}">{{ task.due_at|task_datetime }}</time>{% else %}Неизвестен — историческая задача{% endif %}</dd></div>
+  </dl>
+  <div class="card-deadline-strip"><dl class="task-facts">
+    <div class="task-fact task-deadline"><dt>{{ task_symbol('calendar') }}<span>Срок</span></dt><dd>{% if task.due_at %}<time datetime="{{ task.due_at.isoformat() }}">{{ task.due_at|task_datetime }}</time>{% else %}Неизвестен — историческая задача{% endif %}</dd></div>
     {% if active %}<div class="task-fact task-timing{% if overdue %} task-overdue{% endif %}"><dt>{{ icon('clock',18) }}<span class="sr-only">Время до срока</span></dt><dd>{{ clock.text }}</dd></div>
     {% else %}<div class="task-fact task-closed-date"><dt>{{ icon('check' if task.status == 'completed' else 'history',18) }}<span>{{ 'Выполнено' if task.status == 'completed' else ('Отменена' if task.status == 'cancelled' else 'Отклонена') }}</span></dt><dd>{% if closed_date %}<time datetime="{{ closed_date.isoformat() }}">{{ 'Завершена: ' if task.status == 'completed' else '' }}{{ closed_date|task_datetime }}</time>{% else %}дата и время неизвестны (историческая запись){% endif %}</dd></div>{% endif %}
-  </dl>
+  </dl></div>
   {% if layout == 'list' or not active %}<p class="hint task-created-date"><time datetime="{{ task.created_at.isoformat() }}">Создана: {{ task.created_at|task_datetime }}</time></p>{% endif %}
   {% if not active and clock.text == 'Завершена позже срока' %}<p class="hint">{{ clock.text }}</p>{% endif %}
   {% set no_members=unavailable or (card.unavailable_assignee|default(false) if card else false) %}
   {% if active and (attention or no_members) %}<p class="board-attention">{{ icon('info',16) }}{% if attention %}{{ attention }}{% endif %}{% if no_members %} · Нет доступных исполнителей. Нужно назначить состав или присоединиться.{% endif %}</p>{% endif %}
   <div class="board-card-footer"><div class="board-card-counts"><span>{{ task_symbol('comment',16) }}<span>Комментарии: <strong>{{ card.comment_count if card else (stats.comments if stats is not none else task.comments|length) }}</strong></span></span><span>{{ task_symbol('attachment',16) }}<span>Вложения: <strong>{{ card.attachment_count if card else (stats.attachments if stats is not none else task.attachments|length) }}</strong></span></span></div>
-  <div class="board-card-actions"><a class="button secondary-button task-number" href="{{ card.detail_url if card else detail_url }}" aria-label="Постоянная ссылка на задачу №{{ task.id }}">№{{ task.id }}</a>{% if card and card.actions %}<a class="button" href="{{ url }}" data-board-action>Действия<span class="sr-only"> с задачей «{{ task.title }}»</span></a>{% endif %}<a class="button secondary-button task-open" href="{{ url }}">Открыть {{ icon('arrow',16) }}<span class="sr-only"> задачу «{{ task.title }}»</span></a></div></div>
+  <div class="board-card-actions">{% if card and card.actions %}<a class="button" href="{{ url }}" data-board-action>Действия<span class="sr-only"> с задачей «{{ task.title }}»</span></a>{% endif %}<a class="button secondary-button task-open" href="{{ url }}">Открыть {{ icon('arrow',16) }}<span class="sr-only"> задачу «{{ task.title }}»</span></a></div></div>
   {% if layout == 'board' %}<span class="sr-only" data-drag-hint hidden>Можно перетащить в разрешённую колонку</span>{% endif %}
 </article>
 {%- endmacro %}

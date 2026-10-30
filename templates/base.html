@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Платформа отделов{% endblock %}</title>
+    <link rel="preload" href="{{ url_for('static', filename='fonts/Manrope-variable.ttf') }}" as="font" type="font/ttf" crossorigin>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='caspian-palette.css') }}">
     <script src="{{ url_for('static', filename='ui.js') }}" defer></script>
   </head>
-  <body class="{% block body_class %}{% endblock %}">
+  <body class="{{ 'portal-app' if g.user else 'portal-guest' }} {% block body_class %}{% endblock %}">
     {% from 'components/icons.html' import icon %}
     {% from 'components/ui.html' import nav_link %}
     <a class="skip-link" href="#main">Перейти к содержимому</a>
@@ -18,11 +19,12 @@
     {% endif %}
     {% set user = g.user %}
     {% set endpoint = request.endpoint or '' %}
-    <header class="topbar">
+    <header class="topbar {{ 'topbar-authenticated' if user else 'topbar-guest' }}">
       <div class="topbar-inner">
-        <a class="brand" href="{{ url_for('index') }}"><img class="brand-logo" src="{{ url_for('static',filename='caspian-college-logo.png') }}" width="1280" height="1152" alt="" aria-hidden="true"><span class="brand-name">Caspian College<small>Платформа отделов</small></span></a>
+        <a class="brand" href="{{ url_for('index') }}" aria-label="Caspian College — главная"><img class="brand-logo" src="{{ url_for('static',filename='caspian-college-logo.png') }}" width="1280" height="1152" alt="" aria-hidden="true"><span class="brand-name">Caspian College<small>Платформа отделов</small></span></a>
         {% if user %}
         <button type="button" class="nav-toggle secondary-button" data-nav-toggle aria-label="Основное меню" aria-controls="primary-navigation" aria-expanded="false">{{ icon('menu') }}<span>Меню</span></button>
+        <p class="sidebar-caption">Рабочее пространство</p>
         <nav id="primary-navigation" class="primary-nav" aria-label="Основная навигация">
           {{ nav_link('Задачи', url_for('tasks.received_tasks'), 'tasks', endpoint.startswith('tasks.') and not endpoint.startswith('tasks.notification')) }}
           {% if user.role == 'head' %}
@@ -39,15 +41,24 @@
           {% endif %}
           {{ nav_link('Уведомления', url_for('tasks.notification_center'), 'bell', endpoint.startswith('tasks.notification'), unread_notification_count) }}
         </nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-context">{{ icon('building',18) }}<div><small>{{ 'Платформа колледжа' if user.role == 'admin' else 'Ваш отдел' }}</small><strong>{{ current_user.department.name if current_user.department else portal_roles[user.role] }}</strong></div></div>
         <details class="account-menu">
           <summary aria-label="Учётная запись: {{ user.full_name }}"><span class="account-avatar" aria-hidden="true">{{ user.full_name[0] }}</span><span class="account-summary"><strong>{{ user.full_name }}</strong><small>{{ portal_roles[user.role] }}</small></span>{{ icon('chevron', 15) }}</summary>
           <div class="account-panel"><strong>{{ user.full_name }}</strong><p>{{ portal_roles[user.role] }}{% if current_user.department %}<br>{{ current_user.department.name }}{% endif %}</p>
             <form action="{{ url_for('auth.logout') }}" method="post" data-ui-form><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary-button">{{ icon('logout', 17) }}Выйти</button></form>
           </div>
         </details>
+        </div>
         {% else %}<span class="header-caption">{{ icon('lock', 16) }}Внутренняя платформа</span>{% endif %}
       </div>
     </header>
+    {% if user %}
+    <div class="workspace-bar">
+      <div class="workspace-bar-context"><span class="workspace-bar-label">Caspian College</span><span class="workspace-bar-title">{{ 'Все отделы' if user.role == 'admin' else (current_user.department.name if current_user.department else portal_roles[user.role]) }}</span></div>
+      <div class="workspace-bar-actions"><a class="workspace-notifications" href="{{ url_for('tasks.notification_center') }}" aria-label="Уведомления{% if unread_notification_count %}, непрочитанных: {{ unread_notification_count }}{% endif %}">{{ icon('bell',20) }}{% if unread_notification_count %}<span class="workspace-unread" aria-hidden="true">{{ unread_notification_count }}</span>{% endif %}</a></div>
+    </div>
+    {% endif %}
     <main class="container {% block main_class %}{% endblock %}" id="main" tabindex="-1">
       {% block flash_messages %}{% with messages = get_flashed_messages(with_categories=true) %}{% for category, text in messages %}<div class="message message-{{ 'error' if category == 'error' else 'info' }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ text }}</div>{% endfor %}{% endwith %}{% endblock %}
       {% block content %}{% endblock %}

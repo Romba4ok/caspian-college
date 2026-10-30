@@ -2,7 +2,7 @@
 {% import 'components/ui.html' as ui with context %}
 {% block title %}Пользователи · Caspian College{% endblock %}
 {% block content %}
-<div class="people-workspace"><div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Пользователи</h1><p>Учётные записи, роли и доступ к платформе</p></div>{{ ui.link_button('Добавить пользователя',url_for('admin.admin_user_new'),variant='primary',symbol='plus') }}</div>
+<div class="people-workspace"><div class="people-heading workspace-hero"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Пользователи</h1><p>Учётные записи, роли и доступ к платформе</p></div>{{ ui.link_button('Добавить пользователя',url_for('admin.admin_user_new'),variant='primary',symbol='plus') }}</div>
 {% if error|default('') %}<div class="error-summary" data-error-summary role="alert" tabindex="-1"><h2>Изменения не сохранены</h2><p>{{ error }}</p></div>{% endif %}
 {% if account_notice|default('') %}{{ ui.message(account_notice) }}{% endif %}
 {{ ui.people_table(users,roles=roles) }}{{ ui.account_confirmation() }}</div>

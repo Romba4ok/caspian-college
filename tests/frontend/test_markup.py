@@ -4,11 +4,12 @@ from html.parser import HTMLParser
 import json
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from flask import render_template_string
 
 from preview.server import create_preview_app
-from preview.fixtures import task_context
+from preview.fixtures import presentation_user, task_context
 
 
 class Markup(HTMLParser):
@@ -139,6 +140,38 @@ class MarkupCase(unittest.TestCase):
 class TaskSurfacesCase(unittest.TestCase):
     def setUp(self):
         self.client = create_preview_app(testing=True).test_client()
+
+    def test_board_navigation_preserves_action_context_without_view_switch(self):
+        for role in ("employee", "head", "admin"):
+            for direction, scope in (("received", "received"), ("sent", "sent"),
+                                     ("completed", "received"), ("completed", "sent")):
+                with self.subTest(role=role, direction=direction, scope=scope):
+                    response = self.client.get("/tasks/" + direction,
+                                               query_string=dict(role=role, scope=scope))
+                    self.assertEqual(response.status_code, 200)
+                    markup = Markup(response.text)
+                    context = [n for n in markup.nodes if "data-task-view" in n["attrs"]]
+                    self.assertEqual(len(context), 1)
+                    self.assertEqual(context[0]["attrs"]["data-task-view"], "board")
+                    self.assertEqual(context[0]["attrs"]["data-direction"], direction)
+                    self.assertEqual(context[0]["attrs"]["data-user-id"], str(presentation_user(role).id))
+                    self.assertFalse(markup.with_class("view-toggle"))
+                    self.assertFalse(markup.with_class("task-view-switch"))
+                    links = [n for n in markup.nodes if n["tag"] == "a"]
+                    self.assertFalse([n for n in links if parse_qs(urlsplit(n["attrs"].get("href", "")).query).get("view") == ["list"]])
+                    sections = markup.with_class("task-tabs")
+                    self.assertEqual(len(sections), 1)
+                    section_links = [n for n in links if n["parent"] is sections[0]]
+                    self.assertEqual([urlsplit(n["attrs"]["href"]).path for n in section_links],
+                                     ["/tasks/received", "/tasks/sent", "/tasks/completed"])
+                    scopes = markup.with_class("completed-direction-switch")
+                    self.assertEqual(len(scopes), int(direction == "completed" and role != "admin"))
+                    scope_links = [n for n in links if any(n["parent"] is group for group in scopes)]
+                    if scopes:
+                        self.assertEqual([parse_qs(urlsplit(n["attrs"]["href"]).query)["scope"] for n in scope_links],
+                                         [["received"], ["sent"]])
+                    for link in section_links + scope_links:
+                        self.assertEqual(parse_qs(urlsplit(link["attrs"]["href"]).query).get("view"), ["board"])
 
     def test_complete_board_and_paginated_list_matrix(self):
         for role in ("employee", "head", "admin"):
@@ -669,6 +702,28 @@ class AuditMarkupCase(unittest.TestCase):
     def setUp(self):
         self.app=create_preview_app(testing=True)
         self.client=self.app.test_client()
+
+    def test_filter_disclosure_keeps_active_filters_and_errors_reachable(self):
+        cases = (("", False, 200), ("&nojs=1", False, 200),
+                 ("&user_id=99", True, 200), ("&date_from=2026-10-01", True, 200),
+                 ("&date_to=2026-10-28", True, 200), ("&page=-1", True, 400),
+                 ("&user_id=bad", True, 400), ("&date_from=bad", True, 400))
+        for query, opened, status in cases:
+            with self.subTest(query=query):
+                response = self.client.get("/admin/audit?role=admin" + query)
+                self.assertEqual(response.status_code, status)
+                markup = Markup(response.text)
+                panels = markup.with_class("audit-filter-panel")
+                self.assertEqual(len(panels), 1)
+                panel = panels[0]
+                self.assertEqual(panel["tag"], "details")
+                self.assertEqual("open" in panel["attrs"], opened)
+                self.assertTrue(any(n["tag"] == "summary" and n["parent"] is panel for n in markup.nodes))
+                form = markup.with_class("audit-filters")[0]
+                parent = form["parent"]
+                while parent and parent is not panel:
+                    parent = parent["parent"]
+                self.assertIs(parent, panel)
 
     def filter_fields(self,markup):
         form=markup.with_class("audit-filters")[0]

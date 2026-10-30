@@ -1,5 +1,6 @@
 """Closed groups and direction survive view changes, pagination and refresh."""
 from urllib.parse import parse_qs,urlsplit
+import re
 from support.task_view_fixtures import ViewCase,Markup
 
 
@@ -19,9 +20,16 @@ class CompletedBoardTests(ViewCase):
         for scope,expected in (("sent",set(outgoing)),("received",{incoming})):
             response,ctx=self.render("completed",scope=scope)
             self.assertEqual(expected,set(self.cards(response)));self.assertEqual(31,ctx["counts"]["completed"])
-            links=Markup(response.get_data(as_text=True)).links
-            list_link=next(a["href"] for a in links if parse_qs(urlsplit(a["href"]).query).get("view")==["list"])
-            self.assertEqual([scope],parse_qs(urlsplit(list_link).query)["scope"])
+            source=response.get_data(as_text=True)
+            switches=re.findall(r'<nav\b[^>]*class="completed-direction-switch"[^>]*>(.*?)</nav>',source,re.S)
+            self.assertEqual(1,len(switches))
+            links=Markup(switches[0]).links
+            self.assertEqual(["/tasks/completed","/tasks/completed"],[urlsplit(a["href"]).path for a in links])
+            queries=[parse_qs(urlsplit(a["href"]).query) for a in links]
+            self.assertEqual([["received"],["sent"]],[q["scope"] for q in queries])
+            self.assertTrue(all(q.get("view")==["board"] for q in queries))
+            self.assertEqual([scope],[parse_qs(urlsplit(a["href"]).query)["scope"][0]
+                                      for a in links if a.get("aria-current")=="page"])
             fragment=self.client_for().get("/tasks/completed",query_string=dict(scope=scope,view="board",fragment="board"))
             self.assertEqual(expected,set(self.cards(fragment)));self.assertIn(f"scope={scope}",fragment.get_data(as_text=True))
         response,ctx=self.render("completed",view="list",scope="sent",page=1)

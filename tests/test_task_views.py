@@ -45,10 +45,18 @@ class TaskViewTests(ViewCase):
     def test_second_list_page_switch_opens_complete_board_and_board_to_list_starts_at_first(self):
         self.many(36);response,_=self.render(view="list",page=2)
         links=Markup(response.get_data(as_text=True)).links
-        href=next(a["href"] for a in links if parse_qs(urlsplit(a["href"]).query).get("view")==["board"])
+        href=next(a["href"] for a in links if urlsplit(a["href"]).path=="/tasks/sent"
+                  and parse_qs(urlsplit(a["href"]).query).get("view")==["board"])
+        self.assertNotIn("page",parse_qs(urlsplit(href).query))
         board=self.client_for().get(href);self.assertEqual(36,len(self.cards(board)))
-        href=next(a["href"] for a in Markup(board.get_data(as_text=True)).links if parse_qs(urlsplit(a["href"]).query).get("view")==["list"])
-        self.assertEqual(["1"],parse_qs(urlsplit(href).query)["page"])
+        self.assertFalse([a for a in Markup(board.get_data(as_text=True)).links
+                          if parse_qs(urlsplit(a["href"]).query).get("view")==["list"]])
+        _,first=self.render(view="list")
+        self.assertEqual(1,first["pagination"].page);self.assertEqual(25,len(first["tasks"]))
+        _,second=self.render(view="list",page=2)
+        self.assertEqual(11,len(second["tasks"]))
+        self.assertTrue({t.id for t in first["tasks"]}.isdisjoint(t.id for t in second["tasks"]))
+        self.assertEqual(set(self.cards(board)),{t.id for t in first["tasks"]+second["tasks"]})
 
     def test_overdue_and_remaining_text_only_on_active_tasks(self):
         late=self.card(due_at=NOW-timedelta(hours=2));soon=self.card("in_progress",due_at=NOW+timedelta(hours=3))

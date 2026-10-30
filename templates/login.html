@@ -8,15 +8,24 @@
 {% block content %}
 <div class="login-layout">
   <section class="login-intro" aria-labelledby="login-intro-title">
-    <span class="eyebrow">CASPIAN COLLEGE</span>
-    <h1 id="login-intro-title">Работа отделов —<br><span>в одном пространстве.</span></h1>
-    <p class="login-description">Поручения, документы и результаты.<br>Всё, что нужно для совместной работы.</p>
-    <ul class="login-features">
-      <li><span class="feature-icon">{{ icon('tasks') }}</span><span><strong>Задачи между отделами</strong><small>Понятные поручения и сроки</small></span></li>
-      <li><span class="feature-icon">{{ icon('file') }}</span><span><strong>Комментарии и файлы</strong><small>Материалы рядом с задачей</small></span></li>
-      <li><span class="feature-icon">{{ icon('check') }}</span><span><strong>Прозрачный ход работы</strong><small>От новой задачи до результата</small></span></li>
-    </ul>
+    <div class="login-hero-copy">
+    <span class="eyebrow">ПЛАТФОРМА ОТДЕЛОВ</span>
+    <h1 id="login-intro-title">Вместе — к <br><span>результату.</span></h1>
+    <p class="login-description">Задачи, люди и решения колледжа. <br>В одном рабочем пространстве.</p>
+    </div>
+    <div class="login-art" aria-hidden="true">
+      <div class="login-art-orbit"><span></span><span></span></div>
+      <div class="login-art-tile login-art-tile-main">
+        <div class="login-art-tile-head">{{ icon('building', 22) }}<strong>Командная работа</strong></div>
+        <div class="login-art-lines"><span></span><span></span><span></span></div>
+        <div class="login-art-tile-footer"><div class="login-art-avatars"><span class="login-art-avatar"></span><span class="login-art-avatar"></span><span class="login-art-avatar"></span></div>{{ icon('check', 20) }}</div>
+      </div>
+      <div class="login-art-tile login-art-tile-note">{{ icon('file', 24) }}<div class="login-art-lines"><span></span><span></span></div></div>
+      <div class="login-art-tile login-art-tile-check">{{ icon('check', 32) }}</div>
+    </div>
+    <div class="login-hero-footnote"><p class="login-caption">От поручения до результата —<br>всё на своих местах.</p><span aria-hidden="true">{{ icon('arrow',24) }}</span></div>
   </section>
+  <div class="login-form-panel">
   <section class="card login-card" aria-labelledby="login-title">
     <span class="login-lock">{{ icon('lock', 24) }}</span>
     <h2 id="login-title">Вход в платформу</h2>
@@ -33,5 +42,6 @@
     </form>
     <p class="login-support">{{ icon('info', 15) }}Нет доступа? Обратитесь к начальнику своего отдела.</p>
   </section>
+  </div>
 </div>
 {% endblock %}

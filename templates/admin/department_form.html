@@ -6,7 +6,7 @@
 {% block title %}{{ 'Переименовать отдел' if editing else 'Новый отдел' }} · Caspian College{% endblock %}
 {% block content %}
 <div class="people-workspace departments-workspace"><a class="people-back" data-department-cancel href="{{ url_for('admin.admin_departments') }}">← К отделам</a>
-<div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>{{ 'Переименовать отдел' if editing else 'Новый отдел' }}</h1><p>{{ department.name if editing else 'Добавьте отдел в структуру колледжа' }}</p></div></div>
+<div class="people-heading workspace-hero"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>{{ 'Переименовать отдел' if editing else 'Новый отдел' }}</h1><p>{{ department.name if editing else 'Добавьте отдел в структуру колледжа' }}</p></div></div>
 <div class="account-layout"><section class="card account-form-card"><h2>Название отдела</h2>
 {% if editing and department.is_archived %}{{ ui.message('Отдел в архиве. Переименование сохраняет архивный статус; восстановление выполняется отдельно.') }}{% endif %}
 <form method="post" data-ui-form data-department-form data-account-unsaved="{{ 'true' if request.method=='POST' else 'false' }}" action="{{ url_for('admin.admin_department_edit',department_id=department.id) if editing else url_for('admin.admin_department_new') }}">

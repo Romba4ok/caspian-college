@@ -4,7 +4,7 @@
 {% block title %}Отделы · Caspian College{% endblock %}
 {% block content %}
 <div class="people-workspace departments-workspace">
-<div class="people-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Отделы</h1><p>Структура колледжа и история совместной работы</p></div>{{ ui.link_button('Добавить отдел',url_for('admin.admin_department_new'),variant='primary',symbol='plus') }}</div>
+<div class="people-heading workspace-hero"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Отделы</h1><p>Структура колледжа и история совместной работы</p></div>{{ ui.link_button('Добавить отдел',url_for('admin.admin_department_new'),variant='primary',symbol='plus') }}</div>
 {% if department_notice|default('') %}{{ ui.message(department_notice) }}{% endif %}
 {% if department_error|default('') %}<div class="error-summary" data-error-summary role="alert" tabindex="-1"><h2>Изменения не выполнены</h2><p>{{ department_error }}</p></div>{% endif %}
 {% set archived=departments|selectattr('is_archived')|list|length %}

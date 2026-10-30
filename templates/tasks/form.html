@@ -6,7 +6,7 @@
 {% block main_class %}task-create-workspace{% endblock %}
 {% block content %}
 <nav class="create-breadcrumb" aria-label="Вы здесь"><a href="{{ url_for('tasks.sent_tasks') }}">Другим отделам</a><span aria-hidden="true">/</span><span>Новая задача</span></nav>
-<header class="create-heading"><h1>Новая задача</h1><p>После отправки задача сразу появится у отдела-получателя.</p></header>
+<header class="create-heading workspace-hero"><h1>Новая задача</h1><p>После отправки задача сразу появится у отдела-получателя.</p></header>
 {% if preview_mode|default(false) and creation_receipt|default(none) %}
 <section class="card create-success" role="status" tabindex="-1" data-creation-receipt>
 <span class="create-success-icon">{{ icon('check',28) }}</span><h2>Демонстрационная отправка подтверждена</h2>
@@ -23,15 +23,24 @@
 {{ forms.error_summary(errors, form_error if form_error and error_field not in known_fields else '', prefix='') }}
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="creation_key" value="{{ creation_key }}">
+<fieldset class="form-section">
+<legend class="form-section-legend"><span class="form-section-number" aria-hidden="true">01</span>Описание задачи</legend>
 {{ forms.select_field('recipient_department_id','Отдел-получатель',departments,request.form.get('recipient_department_id',''),true,placeholder='Выберите отдел',error=errors.get('recipient_department_id',''),identifier='recipient_department_id') }}
 {{ forms.field('title','Название',value=request.form.get('title',''),required=true,maxlength=200,error=errors.get('title',''),identifier='title') }}
 {{ forms.textarea_field('description','Описание',request.form.get('description',''),true,hint='Опишите ожидаемый результат и важные условия.',error=errors.get('description',''),identifier='description') }}
+</fieldset>
+<fieldset class="form-section">
+<legend class="form-section-legend"><span class="form-section-number" aria-hidden="true">02</span>Сроки и приоритет</legend>
 <div class="create-field-grid">
 {{ forms.select_field('priority','Приоритет',priority_labels.items(),request.form.get('priority','normal'),true,value_attr=0,label_attr=1,error=errors.get('priority',''),identifier='priority') }}
 {{ forms.field('due_at','Срок выполнения',input_type='datetime-local',value=request.form.get('due_at',''),required=true,hint='Часовой пояс: Asia/Qyzylorda',error=errors.get('due_at',''),identifier='due_at') }}
 </div>
+</fieldset>
 {% if upload_policy and upload_policy.allowed_extensions %}
+<fieldset class="form-section">
+<legend class="form-section-legend"><span class="form-section-number" aria-hidden="true">03</span>Материалы</legend>
 {{ forms.file_field('attachment','Файлы',upload_policy,errors.get('attachment',''),identifier='attachment') }}
+</fieldset>
 {% endif %}
 {% if form_error %}<p class="create-reselect">{{ icon('info',17) }}Введённый текст сохранён. Если прикладывали файлы, выберите их повторно; при повторе неподтверждённой отправки — те же файлы.</p>{% endif %}
 <div class="create-actions">{{ forms.submit_button('Отправить задачу','Отправляем задачу…') }}<a class="button secondary-button" data-create-cancel href="{{ url_for('tasks.sent_tasks') }}">Отмена</a></div>
@@ -40,7 +49,7 @@
 </section>
 <aside class="card create-explanation" aria-labelledby="create-next-title">
 <h2 id="create-next-title">Что произойдёт после отправки?</h2>
-<ol><li><span>1</span><p>Задача получит статус «Новая».</p></li><li><span>2</span><p>Начальник получателя назначит исполнителя, либо сотрудник отдела возьмёт свободную задачу.</p></li><li><span>3</span><p>После выполнения задача попадёт в завершённые.</p></li></ol>
+<ol><li><span>1</span><p>Задача получит статус «Новая».</p></li><li><span>2</span><p>Начальник получателя назначит исполнителей, либо сотрудник отдела возьмёт свободную задачу.</p></li><li><span>3</span><p>После выполнения задача попадёт в завершённые.</p></li></ol>
 <p class="create-info">{{ task_symbol('comment',19) }}Уточнения — в комментариях.</p>
 <p class="create-warning">{{ icon('lock',19) }}После отправки основные поля фиксируются. Срок активной задачи меняет начальник отдела-заказчика.</p>
 <p class="hint">Отправитель: {{ current_user.department.name }}</p>
