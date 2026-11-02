@@ -102,8 +102,10 @@ def _token_scope():
 
 
 def user_data(row):
+    from .accounts import is_account_deleted
     return dict(id=row.id, full_name=row.full_name, username=row.username, role=row.role,
-        department_id=row.department_id, is_active=row.is_active, language=row.language)
+        department_id=row.department_id, is_active=row.is_active, language=row.language,
+        is_deleted=is_account_deleted(row))
 
 
 def department_data(row):

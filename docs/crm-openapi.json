@@ -3280,6 +3280,10 @@
           },
           "language": {
             "type": "string"
+          },
+          "is_deleted": {
+            "type": "boolean",
+            "description": "Removed from staff lists; identity and task history retained. Deleted accounts are inactive."
           }
         },
         "required": [
@@ -3289,7 +3293,8 @@
           "role",
           "department_id",
           "is_active",
-          "language"
+          "language",
+          "is_deleted"
         ]
       },
       "Department": {

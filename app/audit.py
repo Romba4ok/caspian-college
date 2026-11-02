@@ -83,6 +83,7 @@ ADMIN_ACTIONS = {
     "account_created": "Учётная запись создана", "account_updated": "Учётная запись изменена",
     "account_blocked": "Учётная запись отключена", "account_unblocked": "Доступ к учётной записи восстановлен",
     "account_deleted": "Учётная запись удалена", "department_created": "Отдел создан",
+    "account_restored": "Учётная запись возвращена в список",
     "department_renamed": "Отдел переименован", "department_archived": "Отдел архивирован",
     "department_restored": "Отдел восстановлен", "department_deleted": "Пустой отдел удалён",
     "category_created": "Категория создана", "category_renamed": "Категория переименована",
@@ -92,6 +93,7 @@ OBJECTS = {"task": "Задача", "user": "Пользователь", "departme
            "category": "Категория", "system_settings": "Настройки файлов"}
 ROLES = {"admin": "Администратор", "head": "Начальник отдела", "employee": "Сотрудник отдела", "system": "Система"}
 ADMIN_FIELDS = {"full_name": "Имя", "username": "Логин", "role": "Роль", "department_id": "Отдел",
+    "is_deleted": "Удалён из списка",
     "is_blocked": "Заблокирован", "password_changed": "Пароль изменён", "name": "Название",
     "is_archived": "В архиве", "max_upload_mb": "Лимит файла, МБ", "allowed_extensions": "Разрешённые форматы",
     "category_id": "Категория (ID)", "revision": "Версия"}

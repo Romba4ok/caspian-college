@@ -7,7 +7,8 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from . import ROLES
-from .accounts import AccountError, AccountConflict, create_account, update_account, set_account_blocked
+from .accounts import (AccountError, AccountConflict, create_account, update_account, set_account_blocked,
+    delete_account, restore_deleted_account, deleted_account_clause, is_account_deleted)
 from .permissions import db_get
 
 from .extensions import db
@@ -32,7 +33,9 @@ def admin_required(view):
 @admin_bp.route("/admin/users")
 @admin_required
 def admin_users():
-    return render_template("admin_users.html", users=User.query.order_by(User.id).all(), roles=ROLES)
+    deleted = request.args.get("scope") == "deleted"
+    query = User.query.filter(deleted_account_clause() if deleted else ~deleted_account_clause())
+    return render_template("admin_users.html", users=query.order_by(User.id).all(), roles=ROLES, deleted=deleted)
 
 
 def _user_form_context(user=None):
@@ -61,6 +64,7 @@ def _form_error(message, user=None, status=400):
 
 def _account_save(user_id=None):
     user=db_get(User,user_id) if user_id is not None else None
+    if user is not None and is_account_deleted(user): abort(404)
     if request.method=="GET":
         return render_template("admin_user_form.html",**_user_form_context(user))
     try:
@@ -105,10 +109,10 @@ def _block_change(user_id,blocked):
         db.session.rollback();abort(404)
     except AccountError as error:
         db.session.rollback();flash(str(error),"error")
-        return render_template("admin_users.html",users=User.query.order_by(User.id).all(),roles=ROLES),409 if isinstance(error,AccountConflict) else 400
+        return render_template("admin_users.html",users=User.query.filter(~deleted_account_clause()).order_by(User.id).all(),roles=ROLES),409 if isinstance(error,AccountConflict) else 400
     except SQLAlchemyError:
         db.session.rollback();flash("Не удалось изменить доступ пользователя","error")
-        return render_template("admin_users.html",users=User.query.order_by(User.id).all(),roles=ROLES),500
+        return render_template("admin_users.html",users=User.query.filter(~deleted_account_clause()).order_by(User.id).all(),roles=ROLES),500
     flash("Учётная запись отключена" if blocked else "Доступ восстановлен","success")
     return redirect(url_for("admin.admin_users"))
 
@@ -128,8 +132,33 @@ def admin_user_unblock(user_id):
 @admin_bp.route("/admin/users/<int:user_id>/delete",methods=["POST"])
 @admin_required
 def admin_user_delete(user_id):
-    # Compatibility URL: account identity/history are never physically deleted.
-    return _block_change(user_id,True)
+    return _delete_restore(user_id, restoring=False)
+
+
+@admin_bp.route("/admin/users/<int:user_id>/restore",methods=["POST"])
+@admin_required
+def admin_user_restore(user_id):
+    return _delete_restore(user_id, restoring=True)
+
+
+def _delete_restore(user_id, *, restoring):
+    try:
+        _account_form_check({"csrf_token"})
+        operation = restore_deleted_account if restoring else delete_account
+        operation(actor=current_user,user_id=user_id)
+        db.session.commit()
+    except PermissionError:
+        db.session.rollback(); abort(403)
+    except LookupError:
+        db.session.rollback(); abort(404)
+    except (AccountError,SQLAlchemyError) as error:
+        db.session.rollback()
+        flash("Не удалось сохранить изменения" if isinstance(error,SQLAlchemyError) else str(error),"error")
+        status=500 if isinstance(error,SQLAlchemyError) else 409 if isinstance(error,AccountConflict) else 400
+        return render_template("admin_users.html",users=User.query.filter(~deleted_account_clause()).order_by(User.id).all(),roles=ROLES),status
+    flash("Пользователь возвращён в список. Доступ можно включить отдельно" if restoring else
+          "Пользователь удалён из списка. Задачи и история сохранены","success")
+    return redirect(url_for("admin.admin_users"))
 
 
 @admin_bp.route("/admin/departments")

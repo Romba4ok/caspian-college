@@ -37,7 +37,7 @@ class AdminPanelTests(PortalCase):
         self.assertEqual(302, self.client.post(f'/admin/users/{user["id"]}/delete').status_code)
         self.assertTrue(self.account("renamed")["is_blocked"])
         entries = self.audits()
-        self.assertEqual(["account_created", "account_updated", "account_blocked"], [e["action"] for e in entries])
+        self.assertEqual(["account_created", "account_updated", "account_deleted"], [e["action"] for e in entries])
         serialized = json.dumps(entries)
         for secret in ("new-password", "member-password", updated["password_hash"], "password_hash"):
             self.assertNotIn(secret, serialized)

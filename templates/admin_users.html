@@ -5,5 +5,6 @@
 <div class="people-workspace"><div class="people-heading workspace-hero"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h1>Пользователи</h1><p>Учётные записи, роли и доступ к платформе</p></div>{{ ui.link_button('Добавить пользователя',url_for('admin.admin_user_new'),variant='primary',symbol='plus') }}</div>
 {% if error|default('') %}<div class="error-summary" data-error-summary role="alert" tabindex="-1"><h2>Изменения не сохранены</h2><p>{{ error }}</p></div>{% endif %}
 {% if account_notice|default('') %}{{ ui.message(account_notice) }}{% endif %}
-{{ ui.people_table(users,roles=roles) }}{{ ui.account_confirmation() }}</div>
+<nav aria-label="Список пользователей" class="person-actions people-filters"><a class="button {{ 'secondary-button' if deleted|default(false) else '' }}" href="{{ url_for('admin.admin_users') }}"{% if not deleted|default(false) %} aria-current="page"{% endif %}>Пользователи</a><a class="button {{ '' if deleted|default(false) else 'secondary-button' }}" href="{{ url_for('admin.admin_users',scope='deleted') }}"{% if deleted|default(false) %} aria-current="page"{% endif %}>Удалённые</a></nav>
+{{ ui.people_table(users,roles=roles,deleted=deleted|default(false)) }}{{ ui.account_confirmation() }}</div>
 {% endblock %}

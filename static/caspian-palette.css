@@ -231,6 +231,7 @@ input:not([type=checkbox]):not([type=radio])[aria-invalid=true],select[aria-inva
 .split-deadline-fields { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:8px 12px; min-width:0; }
 .split-deadline-fields input { width:100%; min-width:0; }
 .split-deadline-note { grid-column:1 / -1; margin:0; }
+.people-filters { margin-bottom:20px; }
 @media(min-width:1024px) and (max-width:1250px) { .create-deadline-grid { grid-template-columns:minmax(0,1fr); } }
 .create-heading,.people-heading { margin:0 0 28px; padding-left:17px; border-left:4px solid var(--accent); }
 .create-heading h1,.people-heading h1 { margin:0 0 10px; font-size:34px; line-height:1.2; font-weight:800; }

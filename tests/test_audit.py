@@ -275,7 +275,7 @@ class AuditTests(PortalCase):
         post(f"/admin/users/{ident}/edit",self.form("audit-user",full_name="Другое имя",password="new-synthetic-password"),"account_updated")
         post(f"/admin/users/{ident}/block",{},"account_blocked")
         post(f"/admin/users/{ident}/unblock",{},"account_unblocked")
-        post(f"/admin/users/{ident}/delete",{},"account_blocked")
+        post(f"/admin/users/{ident}/delete",{},"account_deleted")
         post("/admin/departments/new",{"name":"Аудит отдела"},"department_created")
         with self.app.app_context(): ident=Department.query.filter_by(name="Аудит отдела").one().id
         post(f"/admin/departments/{ident}/edit",{"name":"Аудит переименован"},"department_renamed")

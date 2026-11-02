@@ -32,7 +32,20 @@ def _id(value):
     return value
 
 
-def _locked_accounts(actor, user_id=None):
+def deleted_account_clause(user_id=User.id):
+    """Deletion state is an explicit audit marker; historical identities stay intact."""
+    latest = select(AdminAuditEvent.details["after"]["is_deleted"].as_boolean()).where(
+        AdminAuditEvent.object_type == "user", AdminAuditEvent.object_id == user_id,
+        AdminAuditEvent.action.in_(("account_deleted", "account_restored")))\
+        .order_by(AdminAuditEvent.id.desc()).limit(1).correlate(User).scalar_subquery()
+    return func.coalesce(latest, False).is_(True)
+
+
+def is_account_deleted(user):
+    return bool(db.session.scalar(select(deleted_account_clause(user.id))))
+
+
+def _locked_accounts(actor, user_id=None, *, include_deleted=False):
     if actor is None or getattr(actor, "id", None) is None:
         raise PermissionError("Требуется действующий пользователь")
     if user_id is not None:
@@ -51,6 +64,8 @@ def _locked_accounts(actor, user_id=None):
         target = accounts.get(user_id)
         if user_id is not None and (target is None or actor.role == "head" and not can_manage_employee(actor, target)):
             raise LookupError("Сотрудник не найден")
+        if target is not None and not include_deleted and is_account_deleted(target):
+            raise LookupError("Сотрудник удалён")
         return actor, target
 
 
@@ -92,7 +107,7 @@ def _fields(actor, target, full_name, username, role, department_id):
 def _require_no_active_assignments(user):
     # The same NO KEY UPDATE user lock is held by assign/claim/reassign/return.
     if db.session.execute(select(Task.id).where(Task.assignments.any(user_id=user.id), Task.status.in_(ACTIVE)).limit(1)).first():
-        raise AccountConflict("Сначала переназначьте активные задачи сотрудника, затем отключите или переведите его")
+        raise AccountConflict("Сначала переназначьте активные задачи сотрудника, затем повторите удаление, отключение или перевод")
 
 
 def create_account(*, actor, full_name, username, password, role=None, department_id=None):
@@ -159,7 +174,7 @@ def set_account_blocked(*, actor, user_id, blocked):
 def authentication_stamp(user):
     """Invalidate signed sessions after password reset or any disable/unblock cycle."""
     latest = db.session.execute(select(func.max(AdminAuditEvent.id)).where(AdminAuditEvent.object_type == "user",
-        AdminAuditEvent.object_id == user.id, AdminAuditEvent.action == "account_blocked")).scalar() or 0
+        AdminAuditEvent.object_id == user.id, AdminAuditEvent.action.in_(("account_blocked", "account_deleted")))).scalar() or 0
     secret = current_app.secret_key
     if isinstance(secret, str): secret = secret.encode("utf-8")
     return hmac.new(secret, f"account-auth:v1|{user.id}|{user.password_hash}|{latest}".encode(), sha256).hexdigest()
@@ -170,5 +185,37 @@ def session_is_current(user, stamp):
         # Existing signed ID-only cookies remain usable until a security edit.
         # They cannot be converted into fresh sessions after disabling/resetting.
         return not db.session.execute(select(AdminAuditEvent.id).where(AdminAuditEvent.object_type == "user",
-            AdminAuditEvent.object_id == user.id, AdminAuditEvent.action.in_(("account_blocked", "account_updated"))).limit(1)).first()
+            AdminAuditEvent.object_id == user.id, AdminAuditEvent.action.in_(("account_blocked", "account_updated", "account_deleted"))).limit(1)).first()
     return isinstance(stamp, str) and len(stamp)==64 and stamp.isascii() and hmac.compare_digest(stamp, authentication_stamp(user))
+
+
+def delete_account(*, actor, user_id):
+    actor, user = _locked_accounts(actor, user_id, include_deleted=True)
+    if user.role == "admin":
+        raise AccountError("Нельзя отключить или удалить единственного администратора")
+    _departments(actor, user)
+    if is_account_deleted(user):
+        return user
+    _require_no_active_assignments(user)
+    before = account_snapshot(user)
+    user.is_blocked = True
+    record_admin_event("account_deleted", "user", user.id, before=before,
+        after=dict(account_snapshot(user), is_deleted=True), actor=actor)
+    db.session.flush()
+    return user
+
+
+def restore_deleted_account(*, actor, user_id):
+    actor, user = _locked_accounts(actor, user_id, include_deleted=True)
+    if actor.role != "admin":
+        raise PermissionError("Восстановление доступно администратору")
+    _departments(actor, user)
+    if not is_account_deleted(user):
+        return user
+    before = dict(account_snapshot(user), is_deleted=True)
+    # Restoration returns the identity to the list; access is enabled separately.
+    user.is_blocked = True
+    record_admin_event("account_restored", "user", user.id, before=before,
+        after=dict(account_snapshot(user), is_deleted=False), actor=actor)
+    db.session.flush()
+    return user

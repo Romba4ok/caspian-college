@@ -53,6 +53,7 @@ def create_app(test_config=None):
     from .reminders import init_app as init_reminders
     from .i18n import init_app as init_i18n, t
     from .crm_api import init_app as init_crm_api
+    from .activity import init_app as init_activity
     from .models import User
 
     app.register_blueprint(auth_bp)
@@ -64,6 +65,7 @@ def create_app(test_config=None):
     init_notifications(app)
     init_reminders(app)
     init_i18n(app)
+    init_activity(app)
     login_manager.localize_callback = t
 
     @login_manager.user_loader

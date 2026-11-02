@@ -6,7 +6,8 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from .accounts import AccountConflict, AccountError, create_account, update_account, set_account_blocked
+from .accounts import (AccountConflict, AccountError, create_account, update_account, set_account_blocked,
+    delete_account, deleted_account_clause, is_account_deleted)
 from .extensions import db
 from .models import Task, TaskAssignee, User
 from .permissions import ACTIVE, can_manage_staff, can_manage_employee, db_get
@@ -25,7 +26,7 @@ def head_required(view):
 
 def _employee(user_id):
     user = db_get(User, user_id)
-    if not can_manage_employee(current_user, user): abort(404)
+    if not can_manage_employee(current_user, user) or is_account_deleted(user): abort(404)
     return user
 
 
@@ -35,7 +36,8 @@ def _fields(allowed):
 
 
 def _list_context(error=None):
-    members = User.query.filter_by(role="employee", department_id=current_user.department_id).order_by(User.full_name, User.id).all()
+    members = User.query.filter_by(role="employee", department_id=current_user.department_id).filter(
+        ~deleted_account_clause()).order_by(User.full_name, User.id).all()
     counts = dict(db.session.execute(select(TaskAssignee.user_id, func.count()).join(Task, Task.id == TaskAssignee.task_id).where(Task.status.in_(ACTIVE),
         TaskAssignee.user_id.in_([u.id for u in members])).group_by(TaskAssignee.user_id)).all())
     return dict(employees=members, active_assignments=counts, department=current_user.department,
@@ -108,4 +110,25 @@ def staff_disable(user_id):
         if isinstance(failure, SQLAlchemyError): message, status = "Не удалось отключить сотрудника", 500
         return render_template("staff/list.html", **_list_context(message)), status
     flash("Учётная запись отключена. Данные и история сохранены", "success")
+    return redirect(url_for("staff.staff_list"))
+
+
+@staff_bp.route("/<int:user_id>/delete", methods=["POST"])
+@head_required
+def staff_delete(user_id):
+    try:
+        _fields({"csrf_token"})
+        delete_account(actor=current_user, user_id=user_id)
+        db.session.commit()
+    except PermissionError:
+        db.session.rollback(); abort(403)
+    except LookupError:
+        db.session.rollback(); abort(404)
+    except (AccountError, SQLAlchemyError) as failure:
+        db.session.rollback()
+        status = 409 if isinstance(failure, AccountConflict) else 400
+        message = "Не удалось удалить сотрудника" if isinstance(failure, SQLAlchemyError) else str(failure)
+        if isinstance(failure, SQLAlchemyError): status = 500
+        return render_template("staff/list.html", **_list_context(message)), status
+    flash("Сотрудник удалён из списка. Его задачи и история сохранены", "success")
     return redirect(url_for("staff.staff_list"))

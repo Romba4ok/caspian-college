@@ -73,7 +73,7 @@ class RequestMonitorTests(unittest.TestCase):
         self.assertFalse(recent.repeated({"requestId":"c"}))
         self.assertFalse(recent.repeated({"requestId":"a"}))
 
-    def run_snapshots(self,snapshots,codes,sleep_effect=None):
+    def run_snapshots(self,snapshots,codes,sleep_effect=None,http=True):
         class Process:
             def __init__(self,rows,code):
                 self.stdout=io.StringIO("".join(json.dumps(row)+"\n" for row in rows))
@@ -86,7 +86,7 @@ class RequestMonitorTests(unittest.TestCase):
              patch.object(monitor,"find_cli",return_value=Path("railway.exe")), \
              patch.object(monitor.subprocess,"Popen",side_effect=processes), \
              patch.object(monitor.time,"sleep",side_effect=sleep_effect), redirect_stdout(output):
-            result=monitor.main(["--project","test-project"])
+            result=monitor.main(["--project","test-project"]+(["--http"] if http else []))
         return result,output.getvalue()
 
     def test_normal_http_snapshots_refresh_quietly_and_only_show_new_requests(self):
@@ -104,6 +104,28 @@ class RequestMonitorTests(unittest.TestCase):
         self.assertEqual(2,code)
         self.assertIn("снова войти в Railway",output)
         self.assertNotIn("TOP-SECRET",output)
+
+    def test_default_mode_shows_named_actions_and_ignores_login_get_and_logout(self):
+        activity={"version":1,"id":"task:15","timestamp":"2026-11-02T05:00:00Z",
+            "actor":{"id":5,"name":"Иван Петров","role":"employee"},"message":"Создал задачу №15"}
+        rows=[self.row(path="/login"),self.row(method="POST",path="/logout"),
+              {"message":json.dumps({"caspian_activity":activity})}]
+        code,output=self.run_snapshots([rows],[0],sleep_effect=KeyboardInterrupt,http=False)
+        self.assertEqual(0,code)
+        self.assertIn("Иван Петров · сотрудник · ID 5",output)
+        self.assertIn("Создал задачу №15",output)
+        self.assertNotIn("HTTP 200",output)
+        self.assertNotIn("Вход в платформу",output)
+
+    def test_activity_text_is_sanitized_and_other_application_logs_hidden(self):
+        self.assertIsNone(monitor.activity_from_row({"message":"password=TOP-SECRET"}))
+        activity={"version":1,"id":"admin:1","timestamp":"2026-11-02T05:00:00Z",
+            "actor":{"id":1,"name":"Admin\npassword=TOP-SECRET","role":"admin"},"message":"Bearer TOP-SECRET"}
+        output=monitor.format_activity(monitor.activity_from_row({"caspian_activity":activity}))
+        self.assertNotIn("TOP-SECRET",output)
+        self.assertNotIn("Admin\n",output)
+        activity["actor"]["role"]={"unexpected":"data"}
+        self.assertIn("участник",monitor.format_activity(activity))
 
 
 if __name__=="__main__":

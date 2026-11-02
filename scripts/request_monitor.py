@@ -1,4 +1,4 @@
-"""Read Railway HTTP logs and explain requests in Russian; standard library only."""
+"""Readable committed user actions; optional HTTP diagnostics. Standard library only."""
 import argparse
 from collections import OrderedDict
 from datetime import datetime
@@ -153,6 +153,44 @@ def format_event(row, *, show_all=False):
     return f"{clock} | {label} | {action}\n  Что произошло: {outcome}\n  Технически: {method} · HTTP {status} · {elapsed}\n"
 
 
+def activity_from_row(row):
+    if not isinstance(row,dict): return None
+    if "caspian_activity" not in row:
+        message=row.get("message")
+        if not isinstance(message,str) or len(message)>16384: return None
+        try: row=json.loads(message)
+        except (ValueError,RecursionError): return None
+    if not isinstance(row,dict): return None
+    activity=row.get("caspian_activity")
+    if not isinstance(activity,dict) or activity.get("version")!=1: return None
+    if not re.fullmatch(r"(?:task|admin|crm):[0-9]{1,10}",str(activity.get("id",""))): return None
+    if not isinstance(activity.get("actor"),dict) or not isinstance(activity.get("message"),str): return None
+    return activity
+
+
+def safe_display(value,limit=400):
+    if not isinstance(value,str): return ""
+    value=re.sub(r"(?i)\bBearer\s+[^\s,;]+","Bearer [скрыто]",value)
+    value=re.sub(r"(?i)(\b(?:password|password_hash|secret|secret_key|token|api_key|пароль|токен)\b\s*[:=]\s*)[^\s,;]+",r"\1[скрыто]",value)
+    return re.sub(r"[\x00-\x1f\x7f]"," ",value).strip()[:limit]
+
+
+def format_activity(activity):
+    if activity is None: return None
+    try:
+        stamp=datetime.fromisoformat(activity.get("timestamp","").replace("Z","+00:00"))
+        if stamp.tzinfo is None: raise ValueError
+        clock=stamp.astimezone(ZoneInfo("Asia/Qyzylorda")).strftime("%d.%m %H:%M:%S")
+    except (ValueError,TypeError,AttributeError): clock="время неизвестно"
+    actor=activity["actor"]
+    name=safe_display(actor.get("name"),120) or "Неизвестный участник"
+    saved_role=actor.get("role")
+    role={"admin":"администратор","head":"начальник отдела","employee":"сотрудник","system":"система"}.get(saved_role,"участник") if isinstance(saved_role,str) else "участник"
+    ident=actor.get("id")
+    identity=f" · ID {ident}" if type(ident) is int and 0<ident<=2147483647 else ""
+    return f"{clock} | {name} · {role}{identity}\n  {safe_display(activity['message'])}\n"
+
+
 class RecentRequests:
     def __init__(self, capacity=4096):
         self.capacity = capacity
@@ -196,6 +234,7 @@ def main(argv=None):
     parser.add_argument("--once", action="store_true", help="Показать последние события и выйти")
     parser.add_argument("--lines", type=int, default=15, choices=range(1,201), metavar="1..200", help="Количество последних событий для --once")
     parser.add_argument("--all", action="store_true", help="Также показывать оформление и проверки доступности")
+    parser.add_argument("--http", action="store_true", help="Технические HTTP-запросы вместо действий пользователей")
     args = parser.parse_args(argv)
     try:
         config = json.loads(CONFIG.read_text(encoding="utf-8-sig")) if CONFIG.exists() else {}
@@ -225,15 +264,19 @@ def main(argv=None):
     except ZoneInfoNotFoundError:
         print("Нет данных часового пояса. Выполните: python -m pip install tzdata")
         return 2
-    command = [str(cli), "logs", "--http", "--json", "--project", project,
+    command = [str(cli), "logs", "--json", "--project", project,
                "--service", service, "--environment", environment]
+    if args.http: command.append("--http")
     if args.once:
         command += ["--lines",str(args.lines)]
-    print("Caspian College — ЖИВОЙ ЖУРНАЛ ЗАПРОСОВ")
-    print("Время: Asia/Qyzylorda. Последние события и новые запросы сайта/CRM.")
-    print("Здесь нет паролей, IP-адресов и содержимого форм. Ctrl+C — остановить просмотр.")
-    print("HTTP-журнал показывает ответы сервера; причины ошибок и результат обычных форм проверяйте на сайте.")
-    print("Ожидаю запросы… Откройте сайт или выполните GET/POST.\n",flush=True)
+    print("Caspian College — "+("ЖИВОЙ ЖУРНАЛ ЗАПРОСОВ" if args.http else "ДЕЙСТВИЯ СОТРУДНИКОВ"))
+    print("Время: Asia/Qyzylorda. Ctrl+C — остановить просмотр.\n")
+    if args.http:
+        print("HTTP показывает ответы сервера; результат обычных форм проверяйте на сайте.")
+    else:
+        print("Кто и что сделал: задачи, комментарии, исполнители, сотрудники и смена паролей.")
+        print("Только сохранённые изменения. Открытия страниц, входы и выходы скрыты.")
+    print("Ожидаю новые действия…\n",flush=True)
     recent = RecentRequests()
     shown = 0
     delay = 3
@@ -255,8 +298,10 @@ def main(argv=None):
                     diagnostic = " ".join(str(row.get(key,"")) for key in ("code","error","message")).lower()
                     if any(term in diagnostic for term in ("unauthorized", "not logged", "railway login", "saved login")):
                         auth_problem = True
-                message = format_event(row, show_all=args.all)
-                if message and not recent.repeated(row):
+                activity=activity_from_row(row) if not args.http else None
+                message = format_event(row, show_all=args.all) if args.http else format_activity(activity)
+                dedup_row=row if args.http else {"requestId":activity["id"]} if activity else {}
+                if message and not recent.repeated(dedup_row):
                     print(message,flush=True)
                     shown += 1
                     delay = 3
