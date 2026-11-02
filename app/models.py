@@ -320,7 +320,27 @@ class AdminAuditEvent(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
 
 
-# create_all is only used by synthetic fixtures; production uses migration 09.
+class CrmEvent(db.Model):
+    """Atomic receipt for CRM reminders and task creation retries."""
+    __tablename__ = "crm_events"
+    __table_args__ = (
+        UniqueConstraint("source", "event_id", name="uq_crm_events_source_event"),
+        CheckConstraint("notification_count >= 0", name="ck_crm_events_count"),
+        CheckConstraint("rework_cycle >= 0", name="ck_crm_events_cycle"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(64), nullable=False)
+    event_id = db.Column(db.String(160), nullable=False)
+    event_type = db.Column(db.String(48), nullable=False)
+    task_id = db.Column(db.Integer, db.ForeignKey("tasks.id", ondelete="RESTRICT"), nullable=False, index=True)
+    due_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    rework_cycle = db.Column(db.Integer, nullable=False)
+    request_hash = db.Column(db.String(64), nullable=False)
+    notification_count = db.Column(db.Integer, nullable=False, default=0)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+
+# create_all is only used by synthetic fixtures; production uses Alembic.
 from sqlalchemy import event as _schema_event
 from .assignment_schema import install_guards as _install_assignment_guards
 _schema_event.listen(TaskAssignee.__table__, "after_create",

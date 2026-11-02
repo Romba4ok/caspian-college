@@ -52,6 +52,7 @@ def create_app(test_config=None):
     from .notifications import init_app as init_notifications
     from .reminders import init_app as init_reminders
     from .i18n import init_app as init_i18n, t
+    from .crm_api import init_app as init_crm_api
     from .models import User
 
     app.register_blueprint(auth_bp)
@@ -59,6 +60,7 @@ def create_app(test_config=None):
     app.register_blueprint(staff_bp)
     app.register_blueprint(tasks_bp)
     app.register_blueprint(reports_bp)
+    init_crm_api(app)
     init_notifications(app)
     init_reminders(app)
     init_i18n(app)

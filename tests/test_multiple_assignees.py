@@ -313,7 +313,7 @@ class MultipleMigrationCases(MigrationDatabase):
         names=("users","departments","task_categories","system_settings","admin_audit_events","groups","group_students")
         before={name:self.rows(name) for name in names}
         self.upgrade()
-        self.assertEqual("20261028_09",db.session.scalar(text("SELECT version_num FROM alembic_version")))
+        self.assertEqual("20261102_10",db.session.scalar(text("SELECT version_num FROM alembic_version")))
         self.assertEqual(before,{name:self.rows(name) for name in names})
         self.assertEqual([],self.rows("task_assignees"));snapshot=self.database_snapshot()
         self.upgrade();self.assertEqual(snapshot,self.database_snapshot())

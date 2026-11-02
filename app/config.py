@@ -15,6 +15,9 @@ class Config:
     ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
     ADMIN_FULL_NAME = os.environ.get("ADMIN_FULL_NAME", "Системный администратор")
     WTF_CSRF_ENABLED = True
+    # Dedicated server-to-server credentials; unset means the API is disabled.
+    CRM_API_READ_TOKEN = os.environ.get("CRM_API_READ_TOKEN")
+    CRM_API_WRITE_TOKEN = os.environ.get("CRM_API_WRITE_TOKEN")
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
 

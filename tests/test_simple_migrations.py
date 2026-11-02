@@ -15,7 +15,7 @@ from app.extensions import db
 from app.models import Task, TASK_STATUSES
 from support.migration_fixtures import MigrationDatabase
 
-HEAD = "20261028_09"
+HEAD = "20261102_10"
 WORKING = ("tasks", "task_comments", "task_events", "task_attachments",
            "task_notifications", "task_translations")
 

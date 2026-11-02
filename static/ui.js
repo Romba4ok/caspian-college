@@ -15,6 +15,48 @@
       button.querySelector("[data-password-hide-icon]").hidden = !showing;
     });
   });
+  // Two native controls, one existing due_at payload; do not convert browser time zones.
+  document.querySelectorAll("[data-split-deadline]").forEach(container => {
+    const canonical = container.querySelector('input[name="due_at"]');
+    const date = container.querySelector('[data-deadline-part="date"]');
+    const time = container.querySelector('[data-deadline-part="time"]');
+    const parts = container.querySelector("[data-deadline-parts]");
+    const fallback = container.querySelector("[data-deadline-fallback]");
+    const error = container.querySelector("[data-split-deadline-error]");
+    const form = canonical?.form;
+    if (!form || !date || !time || !parts || !fallback || date.type !== "date" || time.type !== "time") return;
+    const initial = canonical.value;
+    function fill(value) {
+      const values = value.split("T");
+      date.value = values[0] || "";
+      time.value = values[1]?.slice(0,5) || "";
+    }
+    function sync() { canonical.value = date.value && time.value ? date.value + "T" + time.value : ""; }
+    fill(initial);
+    canonical.type = "hidden";
+    date.disabled = time.disabled = false;
+    fallback.hidden = true;
+    parts.hidden = false;
+    if (canonical.hasAttribute("aria-invalid")) {
+      [date,time].forEach(input => {
+        input.setAttribute("aria-invalid","true");
+        input.setAttribute("aria-describedby","due_at-timezone due_at-split-error");
+      });
+    }
+    form.querySelectorAll('[data-error-summary] a[href="#due_at"]').forEach(link => {
+      link.href = date.value ? "#due_time" : "#due_date";
+    });
+    [date,time].forEach(input => {
+      input.addEventListener("input", () => {
+        sync();
+        if (error) error.hidden = true;
+      });
+      input.addEventListener("change",sync);
+    });
+    form.addEventListener("submit",sync);
+    form.addEventListener("reset", () => queueMicrotask(() => { fill(initial); sync(); }));
+    window.addEventListener("pageshow",sync);
+  });
   const toggle = document.querySelector("[data-nav-toggle]");
   const navigation = document.querySelector("#primary-navigation");
   function closeNavigation(restoreFocus) {
@@ -220,7 +262,7 @@
     const discard = document.querySelector("#create-discard");
     let leaving = false, destination, trigger;
     const dirty = () => [...createForm.elements].some(input => {
-      if (!input.name || input.type === "hidden" || input.type === "submit") return false;
+      if ((!input.name && !input.hasAttribute("data-deadline-part")) || input.type === "hidden" || input.type === "submit") return false;
       if (input.type === "file") return input.files.length > 0;
       return input.name === "priority" ? input.value !== "normal" : !!input.value.trim();
     });

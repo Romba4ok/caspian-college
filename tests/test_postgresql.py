@@ -271,7 +271,7 @@ class PostgreSQLTests(NativeRaces,MigrationDatabase,unittest.TestCase):
     def test_fresh_migration_and_repeat_upgrade(self):
         self.upgrade();before=self.database_snapshot();self.upgrade();self.assertEqual(before,self.database_snapshot())
         with self.app.app_context():
-            self.assertEqual("20261028_09",db.session.scalar(text("SELECT version_num FROM alembic_version")))
+            self.assertEqual("20261102_10",db.session.scalar(text("SELECT version_num FROM alembic_version")))
             self.assertEqual(6,Department.query.count());self.assertTrue(User.query.filter_by(role="admin").one().check_password("synthetic-test-password"))
 
     def test_legacy_initial_accounts_groups_and_hashes_survive_empty_workflow_upgrade(self):
