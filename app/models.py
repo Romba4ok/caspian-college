@@ -255,6 +255,13 @@ class TaskEvent(db.Model):
     actor = db.relationship("User", backref="task_events")
 
 
+# A committed deletion event is the tombstone. No working rows or files are erased.
+# Deferred projection keeps historical migration fixtures compatible.
+Task.is_deleted = db.column_property(
+    db.select(TaskEvent.id).where(TaskEvent.task_id == Task.id, TaskEvent.event_type == "deleted")
+        .exists().correlate_except(TaskEvent), deferred=True)
+
+
 class TaskNotification(db.Model):
     __tablename__ = "task_notifications"
 

@@ -33,13 +33,13 @@ def task_visibility_clause(user):
     if not is_platform_user(user):
         return false()
     if user.role == "admin":
-        return true()
-    return and_(dispatched_clause(), or_(Task.sender_department_id == user.department_id,
+        return ~Task.is_deleted
+    return and_(~Task.is_deleted, dispatched_clause(), or_(Task.sender_department_id == user.department_id,
                                         Task.recipient_department_id == user.department_id))
 
 
 def can_access_task(user, task):
-    if task is None or not is_platform_user(user):
+    if task is None or not is_platform_user(user) or task.is_deleted:
         return False
     return user.role == "admin" or (is_task_dispatched(task) and
         user.department_id in (task.sender_department_id, task.recipient_department_id))

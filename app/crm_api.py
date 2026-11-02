@@ -14,6 +14,7 @@ from werkzeug.exceptions import HTTPException
 
 from .audit import _safe
 from .crm_events import CrmEventError, ingest_deadline_event, ingest_task_creation
+from .crm_mutations import ingest_task_mutation
 from .extensions import csrf, db
 from .models import (AdminAuditEvent, CrmEvent, Department, Task, TaskAttachment,
     TaskComment, TaskEvent, TaskNotification, User, TASK_PRIORITIES, TASK_STATUSES)
@@ -70,7 +71,9 @@ def _datetime(value, field):
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError
-        return parsed.astimezone(timezone.utc)
+        value=parsed.astimezone(timezone.utc)
+        value.astimezone(ZoneInfo(current_app.config["TASK_TIMEZONE"]))
+        return value
     except (ValueError, TypeError, OverflowError):
         raise ApiError("invalid_parameter", f"{field}: укажите ISO 8601 с часовым поясом") from None
 
@@ -97,7 +100,7 @@ def _token_scope():
     if not matches_read and not matches_write:
         raise ApiError("unauthorized", "Неверный ключ API", 401)
     if request.method not in ("GET", "HEAD", "OPTIONS") and not matches_write:
-        raise ApiError("forbidden", "Для POST требуется ключ записи", 403)
+        raise ApiError("forbidden", "Для изменения данных требуется ключ записи", 403)
     return "write" if matches_write else "read"
 
 
@@ -120,8 +123,9 @@ def task_data(row):
         "category", "contact_person")}
     result.update({key: _iso(getattr(row,key)) for key in ("due_at", "created_at", "updated_at", "sent_at", "completed_at", "closed_at")})
     result.update(assignee_ids=row.assignee_ids, due_date=local.date().isoformat() if local else None,
+        is_deleted=bool(row.is_deleted),
         due_time=local.strftime("%H:%M") if local else None, timezone=current_app.config["TASK_TIMEZONE"],
-        is_overdue=bool(row.status in ACTIVE and is_task_dispatched(row) and row.sent_at and as_utc(row.sent_at) <= moment
+        is_overdue=bool(not row.is_deleted and row.status in ACTIVE and is_task_dispatched(row) and row.sent_at and as_utc(row.sent_at) <= moment
             and row.due_at and as_utc(row.due_at) < moment),
         links=dict(comments=url_for("crm_api.list_resource", resource="comments", task_id=row.id),
             attachments=url_for("crm_api.list_resource", resource="attachments", task_id=row.id),
@@ -187,7 +191,7 @@ def _filters(name, model, query):
     integers = {}
     if model is Task:
         allowed |= {"status", "priority", "sender_department_id", "recipient_department_id", "assignee_id",
-            "due_from", "due_to", "updated_since", "updated_until"}
+            "due_from", "due_to", "updated_since", "updated_until", "is_deleted"}
         integers = {"sender_department_id": model.sender_department_id, "recipient_department_id": model.recipient_department_id}
     elif model in (TaskComment, TaskAttachment, TaskEvent, TaskNotification, CrmEvent):
         integers = {"task_id": model.task_id}
@@ -204,9 +208,13 @@ def _filters(name, model, query):
         if field in request.args:
             query = query.filter(column == _int(request.args[field], field))
     if name == "deadlines":
-        query = query.filter(Task.status.in_(ACTIVE), dispatched_clause(), Task.due_at.is_not(None),
+        query = query.filter(~Task.is_deleted, Task.status.in_(ACTIVE), dispatched_clause(), Task.due_at.is_not(None),
             Task.sent_at <= g.crm_read_at, Task.created_at <= g.crm_read_at)
     if model is Task:
+        if "is_deleted" in request.args:
+            if request.args["is_deleted"] not in ("true","false"):
+                raise ApiError("invalid_parameter","is_deleted: ожидается true или false")
+            query=query.filter(Task.is_deleted.is_(request.args["is_deleted"]=="true"))
         for field, values in (("status", TASK_STATUSES), ("priority", TASK_PRIORITIES)):
             if field in request.args:
                 if request.args[field] not in values:
@@ -241,6 +249,7 @@ def index():
         resources={name: url_for("crm_api.list_resource", resource=name) for name in RESOURCES},
         reports=url_for("crm_api.reports"),
         create_task=dict(method="POST", path=url_for("crm_api.create_crm_task")),
+        mutate_task=dict(methods=["PATCH","DELETE"],path="/api/v1/tasks/{id}"),
         receive_event=dict(method="POST", path=url_for("crm_api.receive_event"), event_type="deadline_reminder")))
 
 
@@ -269,7 +278,7 @@ def resource_detail(resource, identifier):
     row = query.filter(model.id == identifier).first()
     if row is None:
         raise ApiError("not_found", "Запись не найдена", 404)
-    if resource == "deadlines" and (row.status not in ACTIVE or not is_task_dispatched(row) or not row.due_at
+    if resource == "deadlines" and (row.is_deleted or row.status not in ACTIVE or not is_task_dispatched(row) or not row.due_at
             or as_utc(row.sent_at) > _now() or as_utc(row.created_at) > _now()):
         raise ApiError("not_found", "Активный срок не найден", 404)
     return _response(serializer(row))
@@ -407,6 +416,77 @@ def receive_event():
         raise ApiError(error.code, str(error), error.status) from None
     result["duplicate"] = duplicate
     return _response(result, status=200 if duplicate else 201)
+
+
+MUTATION_FIELDS={
+    "edit":{"title","description","priority","due_at"},"deadline":{"due_at"},
+    "assign":{"assignee_ids"},"reassign":{"assignee_ids"},
+    **{action:set() for action in ("claim","release","complete","return","cancel","reject","comment")},
+}
+
+
+def _mutation_text(value,field,maximum=None):
+    if not isinstance(value,str) or not value.strip():
+        raise ApiError("invalid_task",f"{field}: требуется непустая строка")
+    value=value.strip()
+    try:value.encode("utf-8")
+    except UnicodeEncodeError:raise ApiError("invalid_task",f"{field}: некорректный Unicode") from None
+    if "\x00" in value or maximum and len(value)>maximum:
+        raise ApiError("invalid_task",f"{field}: недопустимые символы или длина")
+    return value
+
+
+def _mutation_payload(deleting):
+    payload=_json_payload()
+    required={"source","event_id","actor_id","revision","comment"}
+    allowed=required if deleting else required|{"action","changes"}
+    if required-set(payload) or set(payload)-allowed:
+        raise ApiError("invalid_task","Обязательные поля: "+", ".join(sorted(required)))
+    _source_event(payload)
+    for field,minimum in (("actor_id",1),("revision",0)):
+        if type(payload[field]) is not int:raise ApiError("invalid_task",f"{field}: ожидается целое число")
+        payload[field]=_int(payload[field],field,minimum=minimum,maximum=2**31-2)
+    payload["comment"]=_mutation_text(payload["comment"],"comment")
+    action="delete" if deleting else payload.get("action","edit")
+    if not deleting and (not isinstance(action,str) or action not in MUTATION_FIELDS):
+        raise ApiError("unsupported_action","Неизвестное действие PATCH",422)
+    changes=payload.get("changes",{})
+    fields=set() if deleting else MUTATION_FIELDS[action]
+    if not isinstance(changes,dict) or set(changes)-fields or fields and not changes or action!="edit" and set(changes)!=fields:
+        raise ApiError("invalid_task","Поля changes не соответствуют выбранному действию")
+    for key,value in changes.items():
+        if key in ("title","description"):
+            changes[key]=_mutation_text(value,key,200 if key=="title" else None)
+        elif key=="priority":
+            if not isinstance(value,str) or value not in TASK_PRIORITIES:raise ApiError("invalid_task","Неизвестный priority")
+        elif key=="due_at":changes[key]=_datetime(value,key)
+        else:
+            if not isinstance(value,list) or not 1<=len(value)<=200 or any(type(ident) is not int for ident in value):
+                raise ApiError("invalid_task","assignee_ids: массив от 1 до 200 целых ID")
+            changes[key]=sorted(_int(ident,"assignee_ids",maximum=2**31-2) for ident in value)
+            if len(set(value))!=len(value):raise ApiError("invalid_task","Повторяющиеся assignee_ids")
+    payload.update(action=action,changes=changes)
+    return payload
+
+
+@api.route("/tasks/<int:task_id>",methods=["PATCH","DELETE"])
+def mutate_crm_task(task_id):
+    task_id=_int(task_id,"id")
+    payload=_mutation_payload(request.method=="DELETE")
+    try:
+        task,receipt,duplicate=ingest_task_mutation(task_id,payload,deleting=request.method=="DELETE")
+        result=task_data(task)
+        meta=dict(source=receipt.source,event_id=receipt.event_id,duplicate=duplicate)
+        db.session.commit()
+    except CrmEventError as error:
+        raise ApiError(error.code,str(error),error.status) from None
+    except PermissionError as error:
+        raise ApiError("action_forbidden",str(error),403) from None
+    except WorkflowConflict as error:
+        raise ApiError("revision_or_state_conflict",str(error),409) from None
+    except WorkflowError as error:
+        raise ApiError("invalid_task",str(error),400) from None
+    return _response(result,meta=meta)
 
 
 @api.errorhandler(400)

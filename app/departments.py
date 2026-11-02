@@ -118,8 +118,8 @@ def department_counts():
     from .accounts import deleted_account_clause
     members = dict(db.session.execute(select(User.department_id, func.count(User.id))
         .where(User.department_id.is_not(None),~deleted_account_clause()).group_by(User.department_id)).all())
-    directions = union_all(select(Task.sender_department_id.label("department_id")),
-                           select(Task.recipient_department_id.label("department_id"))).subquery()
+    directions = union_all(select(Task.sender_department_id.label("department_id")).where(~Task.is_deleted),
+                           select(Task.recipient_department_id.label("department_id")).where(~Task.is_deleted)).subquery()
     tasks = dict(db.session.execute(select(directions.c.department_id, func.count())
         .group_by(directions.c.department_id)).all())
     return members, tasks

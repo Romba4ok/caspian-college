@@ -21,6 +21,7 @@ TASK_ACTIONS = {
     "cancelled": "Отменил задачу", "rejected": "Отклонил задачу",
     "deadline_changed": "Изменил срок задачи", "comment_added": "Добавил комментарий к задаче",
     "attachment_added": "Добавил материалы к задаче",
+    "updated": "Изменил задачу", "deleted": "Удалил задачу из рабочих списков",
 }
 ADMIN_ACTIONS = {
     "account_created": "Добавил пользователя", "account_updated": "Изменил пользователя",

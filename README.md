@@ -73,14 +73,14 @@ $env:TASK_UPLOAD_DIR = Join-Path $env:LOCALAPPDATA "CaspianCollege\private-uploa
 ## API: подключение другого проекта или CRM
 
 GET получает **актуальные данные из БД**. POST создаёт задачи или обрабатывает
-напоминания. Базовый адрес:
+напоминания, PATCH изменяет задачи, DELETE удаляет их из рабочих списков. Базовый адрес:
 
 ```text
 https://caspian-college-production.up.railway.app/api/v1
 ```
 
 1. На сервере платформы задайте два разных случайных ключа длиной 32–512 символов:
-   `CRM_API_READ_TOKEN` для чтения и `CRM_API_WRITE_TOKEN` для чтения и POST.
+   `CRM_API_READ_TOKEN` для чтения и `CRM_API_WRITE_TOKEN` для чтения, POST, PATCH и DELETE.
    Без настроенных ключей API выключен; на опубликованном Railway они уже настроены.
 2. Передайте нужный ключ доверенному серверу другого проекта через его защищённое окружение.
 3. Отправляйте заголовок `Authorization: Bearer <ключ>` при каждом запросе.
@@ -97,6 +97,8 @@ https://caspian-college-production.up.railway.app/api/v1
 | `GET /notifications`, `GET /events`, `GET /reports` | Уведомления, квитанции CRM и отчётность |
 | `POST /tasks` | Создать и сразу отправить задачу другому отделу |
 | `POST /events` | Обработать напоминание о дедлайне |
+| `PATCH /tasks/{id}` | Изменить поля задачи или выполнить рабочее действие |
+| `DELETE /tasks/{id}` | Удалить задачу из рабочих списков с сохранением истории |
 
 ### GET в PowerShell
 
@@ -133,6 +135,44 @@ Invoke-RestMethod "$base/tasks" -Method Post -Headers $write -ContentType "appli
 Первое создание — HTTP `201`, повтор — `200`; `400` — неверные поля, `401` — ключ
 не принят, `403` — нет прав, `409` — конфликт. Фильтры, полный JSON, скачивание файлов
 и POST напоминаний: [подробная инструкция API](docs/crm-api.md).
+
+### PATCH и DELETE: управление задачами
+
+Оба метода требуют `CRM_API_WRITE_TOKEN` и JSON с `source`, уникальным `event_id`,
+`actor_id`, текущей `revision` и пояснением `comment`. Инициатор должен иметь
+соответствующие права в платформе. ID/версию задачи получают через GET.
+
+Пример изменения названия (замените ID `123` и `actor_id=7`):
+
+```powershell
+$task = (Invoke-RestMethod "$base/tasks/123" -Headers $read).data
+$body = @{source="my-crm"; event_id="edit-task-123-001"; actor_id=7; revision=$task.revision; comment="Уточнили поручение в CRM"; changes=@{title="Подготовить итоговую презентацию"}} | ConvertTo-Json -Depth 5
+Invoke-RestMethod "$base/tasks/123" -Method Patch -Headers $write -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body)) | ConvertTo-Json -Depth 20
+```
+
+DELETE после получения свежей версии:
+
+```powershell
+$task = (Invoke-RestMethod "$base/tasks/123" -Headers $read).data
+$body = @{source="my-crm"; event_id="delete-task-123-001"; actor_id=7; revision=$task.revision; comment="Поручение больше не требуется"} | ConvertTo-Json
+Invoke-RestMethod "$base/tasks/123" -Method Delete -Headers $write -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body)) | ConvertTo-Json -Depth 20
+```
+
+PATCH по умолчанию меняет `title`, `description`, `priority`, `due_at` активной
+задачи. Поля редактирует автор или начальник отправителя; срок — только начальник
+отправителя. Через `action` доступны `assign`, `reassign`, `claim`, `release`,
+`complete`, `return`, `cancel`, `reject`, `deadline`, `comment` по обычным правилам ролей.
+Автор, отделы и служебные даты напрямую не перезаписываются.
+
+DELETE доступен автору/начальнику отправителя. Активная задача закрывается,
+помечается `is_deleted=true` и исчезает с доски и из отчётов. ID, файлы, история
+и квитанции остаются; GET `/tasks` возвращает отметку для синхронизации. Участники
+получают уведомление об удалении. Это не физическое стирание базы.
+
+Для новой команды используйте новый `event_id`; сетевой повтор отправляйте с
+прежним телом/ID. Устаревшая версия даёт `409`: перечитайте задачу перед новой
+командой. Удалённая задача — `410` для новых изменений; точный повтор ранее
+принятой команды возвращает `200` с `meta.duplicate=true`.
 
 ## Монитор: кто и что сделал
 

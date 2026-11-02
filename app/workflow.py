@@ -120,6 +120,8 @@ def _locked_context(actor, task=None, recipient_department_id=None, *, user_ids=
                 .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
             if task is None or {task.sender_department_id, task.recipient_department_id} - targets:
                 raise WorkflowConflict("Задача уже изменена. Обновите страницу")
+            if task.is_deleted:
+                raise WorkflowConflict("Задача удалена из рабочих списков")
             current_ids = tuple(db.session.execute(select(TaskAssignee.user_id).where(
                 TaskAssignee.task_id == task.id).order_by(TaskAssignee.user_id)).scalars())
             if current_ids != previous_assignee_ids:
@@ -617,3 +619,66 @@ def _save_action_files(task, actor, event, prepared_files):
         attachments.append({"id": entry.id, "filename": entry.original_filename, "size_bytes": entry.size_bytes})
     event.details = {**event.details, "attachments": attachments}
     db.session.flush()
+
+
+def edit_task_from_integration(*, task, actor, changes, expected_revision, comment):
+    """A trusted integration may edit active task content on behalf of its sender."""
+    from .permissions import is_sender_employee, is_sender_head, ACTIVE
+    actor, task, _ = _locked_context(actor, task)
+    expected = _version(expected_revision, task)
+    if not is_sender_employee(actor, task) or not (actor.id == task.author_id or is_sender_head(actor, task)):
+        raise PermissionError("Редактирование доступно автору или начальнику отдела-отправителя")
+    if task.status not in ACTIVE:
+        raise WorkflowConflict("Нельзя редактировать поля закрытой задачи")
+    if not isinstance(changes,dict) or not changes or set(changes)-{"title","description","priority","due_at"}:
+        raise WorkflowError("Передайте изменяемые поля title, description, priority, due_at")
+    values={}
+    for key,value in changes.items():
+        if key in ("title","description"):
+            value=value.strip() if isinstance(value,str) else ""
+            if not value or key=="title" and len(value)>200:
+                raise WorkflowError("Некорректное название или описание",key)
+        elif key=="priority":
+            if value not in TASK_PRIORITIES: raise WorkflowError("Неизвестный приоритет","priority")
+        else:
+            value=_utc_deadline(value)
+            if value is None: raise WorkflowError("Срок обязателен","due_at")
+            if value != _utc_deadline(task.due_at) and not is_sender_head(actor, task):
+                raise PermissionError("Срок меняет только начальник отдела-отправителя")
+        previous=_utc_deadline(task.due_at) if key=="due_at" else getattr(task,key)
+        if value!=previous: values[key]=value
+    if not values: raise WorkflowError("Изменения отсутствуют")
+    comment=_required_comment(comment,"Поясните изменения")
+    return _apply_task_change(task=task,actor=actor,expected_revision=expected,values=values,
+        comment=comment,event_type="updated")
+
+
+def delete_task_from_integration(*, task, actor, expected_revision, comment):
+    """Remove from working views; retain identity, receipts, files and audit."""
+    from .models import TaskNotification
+    from .permissions import is_sender_employee,is_sender_head,can_access_task,ACTIVE
+    from sqlalchemy import or_
+    actor,task,_=_locked_context(actor,task)
+    expected=_version(expected_revision,task)
+    if not is_sender_employee(actor,task) or not (actor.id==task.author_id or is_sender_head(actor,task)):
+        raise PermissionError("Удаление доступно автору или начальнику отдела-отправителя")
+    comment=_required_comment(comment,"Укажите причину удаления")
+    candidates=User.query.filter(User.is_blocked.is_(False),or_(
+        User.id.in_({task.author_id,*task.assignee_ids}),
+        (User.role=="head") & User.department_id.in_((task.sender_department_id,task.recipient_department_id)))).populate_existing().all()
+    recipients=[user.id for user in candidates if user.id!=actor.id and can_access_task(user,task)]
+    values={}
+    if task.status in ACTIVE:
+        values=dict(status="cancelled",closed_at=datetime.now(timezone.utc),completed_at=None,is_rework=False)
+    task=_apply_task_change(task=task,actor=actor,expected_revision=expected,values=values,
+        comment=comment,event_type="deleted")
+    event=TaskEvent.query.filter_by(task_id=task.id,event_type="deleted").one()
+    event.details={**event.details,"after":{**event.details["after"],"is_deleted":True},
+        "deletion_notification_recipient_ids":recipients}
+    for user_id in recipients:
+        db.session.add(TaskNotification(user_id=user_id,task_id=None,event_type="deleted",
+            message=f"Задача №{task.id} «{task.title}» удалена из рабочих списков"[:500],
+            deduplication_key=f"task-delete:e:{event.id}:u:{user_id}"))
+    db.session.flush()
+    db.session.expire(task,["is_deleted"])
+    return task

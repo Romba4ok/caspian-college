@@ -51,6 +51,8 @@ def ingest_deadline_event(payload, *, now=None):
     previous = _existing(payload, digest)
     if previous is not None:
         return previous, True
+    if task.is_deleted:
+        raise CrmEventError("task_deleted", "Задача удалена", 410)
     if task.status not in ACTIVE or not is_task_dispatched(task):
         raise CrmEventError("task_not_active", "Для закрытой или неотправленной задачи напоминание недоступно")
     if task.due_at is None or as_utc(task.due_at) != as_utc(payload["due_at"]) or task.rework_cycle != payload["rework_cycle"]:

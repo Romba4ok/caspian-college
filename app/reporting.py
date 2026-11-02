@@ -45,7 +45,7 @@ def _metrics(scope, now, *, group=None):
     columns = [func.count(Task.id).label("total"), count(overdue).label("overdue"),
         count(valid).label("included"), func.avg(case((valid, hours), else_=None)).label("average_hours")]
     columns += [count(Task.status == status).label("status_" + status) for status in TASK_STATUSES]
-    statement = select(*columns).where(scope)
+    statement = select(*columns).where(scope, ~Task.is_deleted)
     if group is not None:
         statement = statement.add_columns(group.label("department_id")).group_by(group)
     result = {}

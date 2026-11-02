@@ -97,6 +97,147 @@ class CrmApiTests(unittest.TestCase):
     def counts(self):
         return CrmEvent.query.count(),TaskNotification.query.count()
 
+    def mutation_payload(self,**changes):
+        payload=dict(source="college-crm",event_id="mutate-task-1",actor_id=self.author.id,
+            revision=1,comment="Обновление из CRM",changes={"title":"Обновлённая задача"})
+        payload.update(changes)
+        return payload
+
+    def mutate(self,payload=None,*,deleting=False,write=True,task_id=None):
+        if payload is None:
+            payload=self.mutation_payload()
+            if deleting:payload.pop("changes")
+        return self.client.open("/api/v1/tasks/"+str(task_id or self.task.id),
+            method="DELETE" if deleting else "PATCH",json=payload,headers=self.headers(write))
+
+    def test_patch_edits_content_with_one_revision_audit_notification_and_receipt(self):
+        response=self.mutate(self.mutation_payload(changes={"title":"Обновлённая задача","description":"Новый текст","priority":"urgent"}))
+        self.assertEqual(200,response.status_code,response.text)
+        task=response.json["data"]
+        self.assertEqual(("Обновлённая задача","Новый текст","urgent",2),(task["title"],task["description"],task["priority"],task["revision"]))
+        self.assertFalse(task["is_deleted"])
+        self.assertFalse(response.json["meta"]["duplicate"])
+        self.assertEqual((1,1,2),(TaskEvent.query.count(),CrmEvent.query.count(),TaskNotification.query.count()))
+        event=TaskEvent.query.one();self.assertEqual("updated",event.event_type)
+        self.assertEqual("college-crm",event.details["crm"]["source"])
+
+    def test_patch_deadline_obeys_sender_head_authority(self):
+        payload=self.mutation_payload(action="deadline",changes={"due_at":"2026-11-05T12:00:00+05:00"})
+        self.assertEqual(403,self.mutate(payload).status_code)
+        sender_head=self.user("sender-head",self.sender.id,"head");db.session.commit()
+        payload["actor_id"]=sender_head.id
+        response=self.mutate(payload)
+        self.assertEqual(200,response.status_code,response.text)
+        self.assertEqual("2026-11-05T07:00:00Z",response.json["data"]["due_at"])
+        self.assertEqual("deadline_changed",TaskEvent.query.one().event_type)
+
+    def test_patch_supports_assignment_completion_return_release_comment_and_cancel(self):
+        replacement=self.user("replacement",self.receiver.id);db.session.commit()
+        revision=1
+        commands=[("reassign",self.head.id,{"assignee_ids":[replacement.id]},"in_progress"),
+                  ("complete",replacement.id,{},"completed"),("return",self.author.id,{},"in_progress"),
+                  ("release",replacement.id,{},"new"),("assign",self.head.id,{"assignee_ids":[self.worker.id]},"in_progress"),
+                  ("comment",self.worker.id,{},"in_progress"),("cancel",self.author.id,{},"cancelled")]
+        for index,(action,actor,changes,status) in enumerate(commands):
+            response=self.mutate(self.mutation_payload(action=action,actor_id=actor,revision=revision,
+                changes=changes,event_id="lifecycle-"+str(index)))
+            self.assertEqual(200,response.status_code,(action,response.text))
+            revision+=1;self.assertEqual((revision,status),(response.json["data"]["revision"],response.json["data"]["status"]))
+        self.assertEqual(7,CrmEvent.query.count());self.assertEqual(7,TaskEvent.query.count())
+
+    def test_patch_claim_and_reject_follow_recipient_rules(self):
+        response=self.mutate(self.mutation_payload(action="claim",actor_id=self.head.id,changes={}))
+        self.assertEqual(200,response.status_code,response.text)
+        self.assertEqual(sorted([self.worker.id,self.head.id]),response.json["data"]["assignee_ids"])
+        response=self.mutate(self.mutation_payload(action="reject",actor_id=self.head.id,changes={},revision=2,event_id="reject"))
+        self.assertEqual(200,response.status_code,response.text)
+        self.assertEqual("rejected",response.json["data"]["status"])
+
+    def test_delete_hides_working_task_and_retains_data_with_standalone_notifications(self):
+        attachment=TaskAttachment(task_id=self.task.id,uploaded_by_id=self.author.id,original_filename="keep.pdf",
+            storage_key="f"*32,content_type="application/pdf",size_bytes=10)
+        db.session.add(attachment);db.session.commit()
+        response=self.mutate(deleting=True)
+        self.assertEqual(200,response.status_code,response.text)
+        task=response.json["data"]
+        self.assertTrue(task["is_deleted"]);self.assertEqual("cancelled",task["status"])
+        self.assertEqual(2,task["revision"])
+        self.assertEqual(1,Task.query.count());self.assertEqual(1,TaskAttachment.query.count())
+        self.assertEqual([self.worker.id],self.task.assignee_ids)
+        self.assertTrue(TaskEvent.query.one().details["after"]["is_deleted"])
+        self.assertEqual("task_deleted",CrmEvent.query.one().event_type)
+        self.assertEqual(2,TaskNotification.query.filter_by(task_id=None,event_type="deleted").count())
+        self.assertEqual([],self.get("/deadlines").json["data"])
+        self.assertEqual(0,self.get("/reports").json["data"]["overall"]["total"])
+        self.assertTrue(self.get("/tasks").json["data"][0]["is_deleted"])
+        self.assertEqual([],self.get("/tasks?is_deleted=false").json["data"])
+        self.assertEqual(1,len(self.get("/tasks?is_deleted=true").json["data"]))
+        self.assertEqual(400,self.get("/tasks?is_deleted=unknown").status_code)
+        self.worker.set_password("synthetic-worker-password");db.session.commit()
+        self.assertEqual(302,self.client.post("/login",data={"username":self.worker.username,"password":"synthetic-worker-password"}).status_code)
+        self.assertEqual(404,self.client.get("/tasks/"+str(self.task.id)).status_code)
+        self.assertNotIn('data-task-id="'+str(self.task.id)+'"',self.client.get("/tasks/received").text)
+        self.assertEqual(1,visible_notifications_query(self.worker).count())
+
+    def test_delete_closed_task_preserves_its_completion_dates(self):
+        self.task.status="completed";self.task.completed_at=NOW;self.task.closed_at=NOW;db.session.commit()
+        response=self.mutate(deleting=True)
+        self.assertEqual(200,response.status_code,response.text)
+        self.assertTrue(response.json["data"]["is_deleted"])
+        self.assertEqual(("completed","2026-11-02T07:00:00Z"),(response.json["data"]["status"],response.json["data"]["completed_at"]))
+
+    def test_patch_delete_require_write_key_and_authorized_active_actor(self):
+        admin=User.query.filter_by(role="admin").one()
+        for deleting in (False,True):
+            self.assertEqual(403,self.mutate(deleting=deleting,write=False).status_code)
+            for actor in (self.worker,self.head,self.outsider,admin):
+                payload=self.mutation_payload(actor_id=actor.id)
+                if deleting:payload.pop("changes")
+                self.assertEqual(403,self.mutate(payload,deleting=deleting).status_code)
+        self.author.is_blocked=True;db.session.commit()
+        self.assertEqual(403,self.mutate().status_code)
+        self.assertEqual(0,CrmEvent.query.count());self.assertEqual(0,TaskEvent.query.count())
+
+    def test_mutation_validation_and_stale_revisions_never_consume_event_id(self):
+        for changes in ({"revision":True},{"revision":"1"},{"actor_id":True},{"comment":" "},
+                        {"comment":"bad\x00"},{"changes":{"title":"x"*201}},
+                        {"changes":{"title":"bad\ud800"}},{"changes":{"status":"completed"}},
+                        {"changes":{"author_id":self.worker.id}},{"changes":{"due_at":"2026-11-05T12:00"}},
+                        {"changes":{"due_at":"9999-12-31T23:00:00Z"}},
+                        {"action":"assign","changes":{"assignee_ids":[True]}},{"action":"assign","changes":{"assignee_ids":[self.worker.id,self.worker.id]}},
+                        {"action":[]},{"changes":[]},{"changes":{}}):
+            response=self.mutate(self.mutation_payload(**changes))
+            self.assertIn(response.status_code,(400,422),(changes,response.text))
+        self.assertEqual(409,self.mutate(self.mutation_payload(revision=0)).status_code)
+        self.assertEqual(0,CrmEvent.query.count())
+        self.assertEqual(200,self.mutate().status_code)
+
+    def test_mutation_retries_normalize_text_and_conflicts_do_not_overwrite(self):
+        first=self.mutate();self.assertEqual(200,first.status_code,first.text)
+        retry=self.mutate(self.mutation_payload(changes={"title":" Обновлённая задача "}))
+        self.assertEqual(200,retry.status_code,retry.text);self.assertTrue(retry.json["meta"]["duplicate"])
+        conflict=self.mutate(self.mutation_payload(changes={"title":"Другой текст"},revision=2))
+        self.assertEqual(409,conflict.status_code)
+        self.assertEqual((2,"Обновлённая задача"),(self.task.revision,self.task.title))
+        self.assertEqual(1,TaskEvent.query.count());self.assertEqual(1,CrmEvent.query.count())
+
+    def test_delete_is_idempotent_and_blocks_later_mutations_and_reminders(self):
+        first=self.mutate(deleting=True);second=self.mutate(deleting=True)
+        self.assertEqual(200,first.status_code,first.text);self.assertTrue(second.json["meta"]["duplicate"])
+        self.assertEqual(1,TaskEvent.query.count());self.assertEqual(1,CrmEvent.query.count())
+        self.assertEqual(410,self.mutate(self.mutation_payload(event_id="after-delete",revision=2)).status_code)
+        self.assertEqual(410,self.post().status_code)
+        self.assertEqual(1,CrmEvent.query.count())
+
+    def test_mutation_database_failure_rolls_back_fields_history_notifications_and_receipt(self):
+        for deleting in (False,True):
+            with patch("app.crm_mutations.CrmEvent",side_effect=SQLAlchemyError("PRIVATE-DB")):
+                response=self.mutate(deleting=deleting)
+            self.assertEqual(503,response.status_code,response.text)
+            self.assertNotIn("PRIVATE-DB",response.text)
+            self.assertEqual((1,False,"in_progress"),(self.task.revision,bool(self.task.is_deleted),self.task.status))
+            self.assertEqual((0,0,0),(TaskEvent.query.count(),CrmEvent.query.count(),TaskNotification.query.count()))
+
     def creation_payload(self, **changes):
         payload = dict(source="college-crm", event_id="create-task-1", author_id=self.author.id,
             recipient_department_id=self.receiver.id, title="Задача из CRM", description="Подготовить материалы",
@@ -445,6 +586,53 @@ class CrmApiTests(unittest.TestCase):
 @unittest.skipUnless(os.environ.get("PORTAL_TEST_DATABASE_URL"),"Requires an isolated PostgreSQL test service")
 class CrmApiPostgresTests(CrmApiTests):
     postgres = True
+
+    def parallel_mutations(self,payloads,*,deleting=False,task_ids=None):
+        barrier=Barrier(len(payloads));task_ids=task_ids or [self.task.id]*len(payloads)
+        def command(item):
+            payload,task_id=item
+            with self.app.test_client() as client:
+                barrier.wait(timeout=10)
+                response=client.open("/api/v1/tasks/"+str(task_id),method="DELETE" if deleting else "PATCH",
+                    json=payload,headers=self.headers(True))
+                return response.status_code,response.json
+        with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
+            return list(pool.map(command,zip(payloads,task_ids)))
+
+    def test_native_identical_patch_and_delete_races_apply_once(self):
+        payload=self.mutation_payload()
+        results=self.parallel_mutations([payload,payload])
+        self.assertEqual([200,200],[status for status,_ in results],results)
+        self.assertEqual([False,True],sorted(body["meta"]["duplicate"] for _,body in results))
+        self.assertEqual(1,TaskEvent.query.count());self.assertEqual(1,CrmEvent.query.count())
+        payload=self.mutation_payload(event_id="delete-race",revision=2);payload.pop("changes")
+        results=self.parallel_mutations([payload,payload],deleting=True)
+        self.assertEqual([200,200],[status for status,_ in results],results)
+        self.assertEqual([False,True],sorted(body["meta"]["duplicate"] for _,body in results))
+        db.session.expire_all()
+        self.assertTrue(self.task.is_deleted);self.assertEqual(3,self.task.revision)
+        self.assertEqual(2,TaskEvent.query.count());self.assertEqual(2,CrmEvent.query.count())
+
+    def test_native_competing_revisions_leave_one_successful_command(self):
+        sender_head=self.user("sender-head",self.sender.id,"head");db.session.commit()
+        first=self.mutation_payload()
+        second=self.mutation_payload(actor_id=sender_head.id,event_id="competing",changes={"title":"Другая правка"})
+        results=self.parallel_mutations([first,second])
+        self.assertEqual([200,409],sorted(status for status,_ in results),results)
+        self.assertEqual(1,TaskEvent.query.count());self.assertEqual(1,CrmEvent.query.count())
+        db.session.expire_all();self.assertEqual(2,self.task.revision)
+
+    def test_native_shared_event_id_on_different_tasks_rolls_back_losing_mutation(self):
+        other=Task(title="Другая задача",description="Сохранить",author_id=self.author.id,
+            sender_department_id=self.sender.id,recipient_department_id=self.receiver.id,status="new",
+            due_at=NOW+timedelta(days=1),created_at=NOW,sent_at=NOW,revision=1)
+        db.session.add(other);db.session.commit()
+        payload=self.mutation_payload()
+        results=self.parallel_mutations([payload,payload],task_ids=[self.task.id,other.id])
+        self.assertEqual([200,409],sorted(status for status,_ in results),results)
+        db.session.expire_all()
+        self.assertEqual([1,2],sorted([self.task.revision,other.revision]))
+        self.assertEqual(1,TaskEvent.query.count());self.assertEqual(1,CrmEvent.query.count())
 
     def parallel_creations(self,payloads):
         barrier=Barrier(len(payloads))

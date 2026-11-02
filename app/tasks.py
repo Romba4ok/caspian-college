@@ -450,6 +450,7 @@ def _comment_files(task):
 
 
 HISTORY_LABELS = {
+    "updated": "Поля задачи изменены", "deleted": "Задача удалена из рабочих списков",
     "claimed": "Сотрудник взял задачу", "released": "Исполнитель снял задачу с себя",
     "created": "Задача создана", "edited": "Поручение изменено", "assigned": "Исполнитель назначен",
     "reassigned": "Состав исполнителей изменён", "status_changed": "Статус изменён", "work_started": "Работа начата",
@@ -463,6 +464,7 @@ HISTORY_LABELS = {
     "workflow_migrated": "Переход на новый процесс",
 }
 HISTORY_FIELDS = {"title": "Название", "description": "Описание", "status": "Статус", "priority": "Приоритет",
+    "is_deleted": "Удалена из рабочих списков",
     "assignee_id": "Исполнитель (прежняя запись)", "assignees": "Состав исполнителей", "author_id": "Автор", "sender_department_id": "Отдел-отправитель",
     "recipient_department_id": "Отдел-получатель", "category": "Категория", "contact_person": "Контактное лицо",
     "due_at": "Срок", "sent_at": "Отправка", "completed_at": "Завершение", "closed_at": "Закрытие", "is_rework": "На доработке", "rework_cycle": "Цикл доработки"}

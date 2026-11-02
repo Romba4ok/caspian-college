@@ -89,6 +89,7 @@ def init_app(app):
 
 
 EVENT_LABELS = {
+    "updated": "Задача изменена", "deleted": "Задача удалена",
     "submitted_for_approval": "Заявка передана на согласование",
     "approval_withdrawn": "Автор отозвал заявку",
     "approval_returned": "Заявка возвращена автору",
@@ -175,7 +176,7 @@ def event_notification_recipients(task, event):
         ids = assignee | author | sender_heads
     elif kind == "returned_for_revision":
         ids = assignee | recipient_heads
-    elif kind in ("cancelled", "deadline_changed", "rejected"):
+    elif kind in ("cancelled", "deadline_changed", "rejected", "updated"):
         ids = author | assignee | sender_heads | recipient_heads
     elif kind in ("comment_added", "attachment_added"):
         ids = author | assignee | recipient_heads
