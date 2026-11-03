@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, current_app, g, flash, redirect, render_template, request, send_file, url_for, make_response
 from flask_login import current_user, login_required
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import undefer
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -199,9 +199,9 @@ def _task_ordering(direction):
     return (priority, Task.due_at.is_(None), Task.due_at.asc(), Task.created_at.desc(), Task.id.desc())
 
 
-def _list_context(direction):
+def _scoped_query(direction):
+    """Видимые задачи направления и, для закрытых задач, выбранный scope."""
     query = _visible_task_query(direction)
-    counts = {key: _visible_task_query(key).count() for key in LIST_ENDPOINTS}
     completed_scope = None
     if direction == "completed" and current_user.role != "admin":
         completed_scope = request.args.get("scope", "received")
@@ -209,7 +209,32 @@ def _list_context(direction):
             completed_scope = "received"
         field = Task.recipient_department_id if completed_scope == "received" else Task.sender_department_id
         query = query.filter(field == current_user.department_id)
-    list_total = query.count() if completed_scope else counts[direction]
+    return query, completed_scope
+
+
+def _search_text():
+    return request.args.get("search", "").strip()[:80]
+
+
+def _apply_search(query, text):
+    """Поиск по названию, описанию или номеру; служебные символы LIKE экранируются."""
+    if not text:
+        return query
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    conditions = [Task.title.ilike(pattern, escape="\\"), Task.description.ilike(pattern, escape="\\")]
+    number = text.lstrip("№# ")
+    if number.isascii() and number.isdigit() and len(number) <= 9:
+        conditions.append(Task.id == int(number))
+    return query.filter(or_(*conditions))
+
+
+def _list_context(direction):
+    query, completed_scope = _scoped_query(direction)
+    search = _search_text()
+    query = _apply_search(query, search)
+    counts = {key: _visible_task_query(key).count() for key in LIST_ENDPOINTS}
+    list_total = query.count() if (completed_scope or search) else counts[direction]
     ordered = query.order_by(*_task_ordering(direction))
     moment = _now()
     view = "list" if request.args.get("view") == "list" else "board"
@@ -222,7 +247,7 @@ def _list_context(direction):
         card_counts = projection.card_counts
         # Match the groups and current tab to the same materialized SQL result,
         # even if another request changed a task since the earlier tab counts.
-        if not completed_scope:
+        if not completed_scope and not search:
             counts[direction] = pagination.total
         for task in tasks:
             board_data[task.id] = dict(id=task.id, title=task.title, revision=task.revision,
@@ -256,7 +281,7 @@ def _list_context(direction):
                      if current_user.role == "admin" else LIST_LABELS), list_endpoints=LIST_ENDPOINTS,
         view=view, board_data=board_data, card_counts=card_counts, board_columns=columns, board_groups=groups,
         upload_policy=_detail_upload_policy() if view == "board" else None,
-        counts=counts, completed_scope=completed_scope,
+        counts=counts, completed_scope=completed_scope, search=search,
         may_create=can_create_task(current_user),
         deadline_states={task.id: _deadline_state(task, moment) for task in tasks},
         attention={task.id: _attention(task) for task in tasks},
@@ -289,6 +314,38 @@ def sent_tasks():
 @task_user_required
 def completed_tasks():
     return _list_context("completed")
+
+
+def _csv_safe(value):
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+@tasks_bp.route("/export.csv")
+@task_user_required
+def export_tasks():
+    direction = request.args.get("direction", "received")
+    if direction not in LIST_ENDPOINTS:
+        abort(400)
+    query, _scope = _scoped_query(direction)
+    query = _apply_search(query, _search_text())
+    rows = query.options(*task_card_options()).order_by(*_task_ordering(direction)).limit(2000).all()
+    import csv
+    import io
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(["№", "Название", "Статус", "Приоритет", "Отправитель", "Получатель", "Срок", "Исполнители", "Создана"])
+    for task in rows:
+        writer.writerow([task.id, _csv_safe(task.title), STATUS_LABELS.get(task.status, task.status),
+            PRIORITY_LABELS.get(task.priority, task.priority), _csv_safe(task.sender_department.name),
+            _csv_safe(task.recipient_department.name),
+            format_task_datetime(task.due_at) if task.due_at else "",
+            _csv_safe(", ".join(user.full_name for user in task.assignees)), format_task_datetime(task.created_at)])
+    response = make_response("\ufeff" + buffer.getvalue())
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = f'attachment; filename="tasks-{direction}.csv"'
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @tasks_bp.route("/notifications")

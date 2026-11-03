@@ -49,6 +49,7 @@ def create_app(test_config=None):
     from .staff import staff_bp
     from .tasks import tasks_bp
     from .reporting import reports_bp
+    from .dashboard import dashboard_bp
     from .notifications import init_app as init_notifications
     from .reminders import init_app as init_reminders
     from .i18n import init_app as init_i18n, t
@@ -61,6 +62,7 @@ def create_app(test_config=None):
     app.register_blueprint(staff_bp)
     app.register_blueprint(tasks_bp)
     app.register_blueprint(reports_bp)
+    app.register_blueprint(dashboard_bp)
     init_crm_api(app)
     init_notifications(app)
     init_reminders(app)
@@ -96,7 +98,7 @@ def create_app(test_config=None):
     def index():
         if not current_user.is_authenticated:
             return redirect(url_for("auth.login"))
-        return redirect(url_for("tasks.received_tasks"))
+        return redirect(url_for("dashboard.dashboard"))
 
     @app.errorhandler(403)
     def forbidden(_error):

@@ -157,7 +157,7 @@ class TaskContractsCase(unittest.TestCase):
         self.assertEqual(next_links[0]['scope'], ['sent'])
         self.assertEqual(next_links[0]['view'], ['list'])
         self.assertNotIn('name="filter"', html)
-        self.assertNotIn('name="search"', html)
+        self.assertEqual(html.count('name="search"'), 1)  # единственное разрешённое поле — поиск по задачам
 
     def test_fragment_has_full_projection_identity_and_no_active_content(self):
         response = self.client.get('/tasks/completed?role=admin&size=300&fragment=board')

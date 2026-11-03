@@ -35,16 +35,17 @@ class TaskNavigationTests(PortalCase):
     def test_menu_order_and_tasks_landing_for_all_roles(self):
         for name in ("root", "head", "employee"):
             self.as_user(name)
-            self.assertEqual("/tasks/received", self.client.get("/").location)
+            self.assertEqual("/dashboard", self.client.get("/").location)
             page = self.client.get("/tasks/received").get_data(as_text=True)
             parser = NavigationLinks()
             parser.feed(page)
-            self.assertEqual("/tasks/received", parser.links[0])
+            self.assertEqual("/dashboard", parser.links[0])
+            self.assertEqual("/tasks/received", parser.links[1])
             self.assertEqual("/tasks/notifications", parser.links[-1])
             if name in ("root", "head"):
                 self.assertEqual("/admin/statistics" if name == "root" else "/reports/department", parser.links[-2])
             else:
-                self.assertEqual(2, len(parser.links))
+                self.assertEqual(3, len(parser.links))
 
     def test_closed_direction_switch_is_private_and_filters_both_ways(self):
         sent = datetime(2029, 1, 1, tzinfo=timezone.utc)
@@ -88,8 +89,8 @@ class CurrentActionFormsTests(PortalCase):
         self.add_member("receiver-head",role="head",department_id=self.other_department_id)
 
     def test_exact_menus_and_current_item_for_every_role(self):
-        expected={"root":["/tasks/received","/admin/users","/admin/departments","/admin/audit","/admin/statistics","/tasks/notifications"],
-            "head":["/tasks/received","/staff","/reports/department","/tasks/notifications"],"employee":["/tasks/received","/tasks/notifications"]}
+        expected={"root":["/dashboard","/tasks/received","/admin/users","/admin/departments","/admin/audit","/admin/statistics","/tasks/notifications"],
+            "head":["/dashboard","/tasks/received","/staff","/reports/department","/tasks/notifications"],"employee":["/dashboard","/tasks/received","/tasks/notifications"]}
         for name,paths in expected.items():
             client=self.app.test_client();self.login(name,client=client)
             for path in paths:

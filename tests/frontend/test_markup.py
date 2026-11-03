@@ -54,9 +54,9 @@ class MarkupCase(unittest.TestCase):
 
     def test_role_navigation_order_and_destination_labels(self):
         expected = {
-            "employee": ["Задачи", "Уведомления"],
-            "head": ["Задачи", "Сотрудники", "Отчёты", "Уведомления"],
-            "admin": ["Задачи", "Пользователи", "Отделы", "Журнал действий", "Отчёты", "Уведомления"],
+            "employee": ["Дашборд", "Задачи", "Уведомления"],
+            "head": ["Дашборд", "Задачи", "Сотрудники", "Отчёты", "Уведомления"],
+            "admin": ["Дашборд", "Задачи", "Пользователи", "Отделы", "Журнал действий", "Отчёты", "Уведомления"],
         }
         for role, labels in expected.items():
             with self.subTest(role=role):
@@ -251,7 +251,7 @@ class TaskSurfacesCase(unittest.TestCase):
         self.assertFalse(markup.with_class("task-create"))
         self.assertFalse(markup.with_class("completed-direction-switch"))
         self.assertFalse([n for n in markup.nodes if "data-board-action" in n["attrs"]])
-        forms = [n for n in markup.nodes if n["tag"] == "form"]
+        forms = [n for n in markup.nodes if n["tag"] == "form" and n["attrs"].get("role") != "search"]
         self.assertEqual([n["attrs"].get("action") for n in forms], ["/logout"])
         for card in markup.with_class("board-card"):
             text = "".join(card["text"])

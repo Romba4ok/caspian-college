@@ -9,27 +9,22 @@
 <div class="login-layout">
   <section class="login-intro" aria-labelledby="login-intro-title">
     <div class="login-hero-copy">
-    <span class="eyebrow">ПЛАТФОРМА ОТДЕЛОВ</span>
-    <h1 id="login-intro-title">Вместе — к <br><span>результату.</span></h1>
-    <p class="login-description">Задачи, люди и решения колледжа. <br>В одном рабочем пространстве.</p>
+      <span class="login-crest" aria-hidden="true"><img src="{{ url_for('static',filename='caspian-college-logo.png') }}" width="1280" height="1152" alt=""></span>
+      <h1 id="login-intro-title">Платформа поручений между отделами</h1>
+      <p class="login-description">Задачи, сроки и результаты колледжа в одном рабочем пространстве.</p>
+      <ul class="login-features">
+        <li>{{ icon('tasks', 22) }}<span>Доска поручений по отделам</span></li>
+        <li>{{ icon('bell', 22) }}<span>Напоминания о сроках и просрочках</span></li>
+        <li>{{ icon('file', 22) }}<span>Файлы и обсуждение прямо в задаче</span></li>
+        <li>{{ icon('chart', 22) }}<span>Отчёты и аналитика по отделам</span></li>
+      </ul>
     </div>
-    <div class="login-art" aria-hidden="true">
-      <div class="login-art-orbit"><span></span><span></span></div>
-      <div class="login-art-tile login-art-tile-main">
-        <div class="login-art-tile-head">{{ icon('building', 22) }}<strong>Командная работа</strong></div>
-        <div class="login-art-lines"><span></span><span></span><span></span></div>
-        <div class="login-art-tile-footer"><div class="login-art-avatars"><span class="login-art-avatar"></span><span class="login-art-avatar"></span><span class="login-art-avatar"></span></div>{{ icon('check', 20) }}</div>
-      </div>
-      <div class="login-art-tile login-art-tile-note">{{ icon('file', 24) }}<div class="login-art-lines"><span></span><span></span></div></div>
-      <div class="login-art-tile login-art-tile-check">{{ icon('check', 32) }}</div>
-    </div>
-    <div class="login-hero-footnote"><p class="login-caption">От поручения до результата —<br>всё на своих местах.</p><span aria-hidden="true">{{ icon('arrow',24) }}</span></div>
   </section>
   <div class="login-form-panel">
   <section class="card login-card" aria-labelledby="login-title">
     <span class="login-lock">{{ icon('lock', 24) }}</span>
     <h2 id="login-title">Вход в платформу</h2>
-    <p class="login-help">Используйте учётную запись колледжа.</p>
+    <p class="login-help">Используйте логин и пароль, выданные администратором платформы.</p>
     {% if integrated_preview_mode|default(false) %}<p class="hint">Тестовый вход: demo.head, demo.employee или demo.admin.<br>Пароль стенда: Caspian-demo-2026!</p>{% endif %}
     {% set errors = form_errors|default({}) %}
     {% set authentication_error = get_flashed_messages(category_filter=['error'])|join(' ') %}

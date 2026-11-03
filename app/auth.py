@@ -3,14 +3,14 @@
 from urllib.parse import urlparse
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for, session
-from flask_login import current_user, login_user, logout_user
+from flask_login import current_user, login_required, login_user, logout_user
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from .extensions import db
 from .models import User
 from .permissions import is_platform_user
-from .accounts import authentication_stamp
+from .accounts import AccountError, authentication_stamp, change_own_password
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -58,3 +58,31 @@ def logout():
     session.pop("_auth_stamp",None)
     flash("Вы вышли из системы", "success")
     return redirect(url_for("auth.login"))
+
+
+@auth_bp.route("/account/password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    errors = {}
+    if request.method == "POST":
+        try:
+            change_own_password(user_id=current_user.id, current_password=request.form.get("current_password", ""),
+                new_password=request.form.get("new_password", ""), repeat_password=request.form.get("repeat_password", ""))
+            db.session.flush()
+            session["_auth_stamp"] = authentication_stamp(db.session.get(User, current_user.id))
+            db.session.commit()
+        except PermissionError:
+            db.session.rollback()
+            logout_user()
+            return redirect(url_for("auth.login"))
+        except AccountError as failure:
+            db.session.rollback()
+            errors[failure.field or "new_password"] = str(failure)
+            return render_template("account/password.html", form_errors=errors), 400
+        except SQLAlchemyError:
+            db.session.rollback()
+            flash("Не удалось сменить пароль. Повторите попытку", "error")
+            return render_template("account/password.html", form_errors={}), 500
+        flash("Пароль изменён", "success")
+        return redirect(url_for("auth.change_password"))
+    return render_template("account/password.html", form_errors=errors)

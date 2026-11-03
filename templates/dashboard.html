@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% from 'components/icons.html' import icon %}
+{% block title %}Дашборд · Платформа отделов{% endblock %}
+{% block main_class %}dashboard-workspace{% endblock %}
+{% macro task_row(task, kind) -%}
+<li class="dash-task dash-task-{{ kind }}">
+  <a href="{{ url_for('tasks.task_detail', task_id=task.id) }}">
+    <span class="dash-task-main"><strong>{{ task.title }}</strong><small>№{{ task.id }} · от {{ task.sender_department.name }}</small></span>
+    <span class="dash-task-due"><b>{{ task.due_at|task_datetime }}</b><small>{{ data.deadline_states[task.id].text }}</small></span>
+  </a>
+</li>
+{%- endmacro %}
+{% block content %}
+<section class="workspace-hero dash-hero" aria-labelledby="dash-title">
+  <div class="dash-hero-copy">
+    <span class="eyebrow">{{ 'Все отделы · обзор администратора' if current_user.role == 'admin' else 'Отдел · входящие поручения' }}</span>
+    <h1 id="dash-title">{{ 'Платформа колледжа' if current_user.role == 'admin' else data.department.name }}</h1>
+    <p>{{ current_user.full_name }} · по состоянию на {{ data.generated_at|task_datetime('%d.%m.%Y %H:%M') }}{% if data.total %} · выполнено: <strong>{{ data.done }} из {{ data.total }}</strong>{% endif %}</p>
+    <div class="dash-actions">
+      {% if current_user.role != 'admin' %}<a class="button" href="{{ url_for('tasks.task_new') }}">{{ icon('tasks',18) }}Новая задача</a>{% endif %}
+      <a class="button secondary-button" href="{{ url_for('tasks.received_tasks') }}">{{ icon('tasks',18) }}Открыть доску</a>
+      {% if current_user.role != 'admin' %}<a class="button secondary-button" href="{{ url_for('tasks.sent_tasks') }}">{{ icon('arrow',18) }}Отправленные</a>{% endif %}
+    </div>
+  </div>
+  <div class="dash-ring-card" role="group" aria-label="Исполнение поручений: {{ data.percent }}%">
+    {% set tot = data.total or 1 %}
+    {% set seg_a = (data.done * 100 / tot)|round(2) %}
+    {% set seg_b = seg_a + (data.in_progress * 100 / tot)|round(2) %}
+    {% set seg_c = seg_b + (data.new * 100 / tot)|round(2) %}
+    <div class="dash-ring" style="--pct: {{ data.percent }}; --a: {{ seg_a if data.total else 0 }}; --b: {{ seg_b if data.total else 0 }}; --c: {{ seg_c if data.total else 0 }}"><div><strong>{{ data.percent }}%</strong><span>исполнение</span></div></div>
+    <ul class="dash-legend">
+      <li><i class="dot dot-done"></i><b>{{ data.done }}</b> выполнено</li>
+      <li><i class="dot dot-work"></i><b>{{ data.in_progress }}</b> в работе</li>
+      <li><i class="dot dot-new"></i><b>{{ data.new }}</b> новых</li>
+      <li><i class="dot dot-late"></i><b>{{ data.overdue }}</b> просрочено</li>
+    </ul>
+  </div>
+</section>
+
+<div class="dash-kpis">
+  <article class="card dash-kpi"><span class="dash-kpi-icon">{{ icon('tasks',24) }}</span><div><strong>{{ data.total }}</strong><span>Всего входящих поручений</span></div></article>
+  <article class="card dash-kpi dash-kpi-done"><span class="dash-kpi-icon">{{ icon('check',24) }}</span><div><strong>{{ data.done }}</strong><span>Выполнено</span></div></article>
+  <article class="card dash-kpi dash-kpi-work"><span class="dash-kpi-icon">{{ icon('clock',24) }}</span><div><strong>{{ data.in_progress }}</strong><span>В работе</span></div></article>
+  <article class="card dash-kpi dash-kpi-late"><span class="dash-kpi-icon">{{ icon('alert',24) }}</span><div><strong>{{ data.overdue }}</strong><span>Просрочено</span></div></article>
+  <article class="card dash-kpi dash-kpi-soon"><span class="dash-kpi-icon">{{ icon('flag',24) }}</span><div><strong>{{ data.soon }}</strong><span>Срок в ближайшие {{ data.soon_days }} дней</span></div></article>
+  {% if data.outgoing_active is not none %}<article class="card dash-kpi"><span class="dash-kpi-icon">{{ icon('arrow',24) }}</span><div><strong>{{ data.outgoing_active }}</strong><span>Отправленных в работе</span></div></article>{% endif %}
+</div>
+
+<div class="dash-columns">
+  <section class="card dash-panel" aria-labelledby="dash-late">
+    <div class="dash-panel-head"><h2 id="dash-late">{{ icon('alert',22) }}Просроченные</h2><span class="badge task-late">{{ data.overdue }}</span></div>
+    {% if data.overdue_tasks %}<ul class="dash-list">{% for task in data.overdue_tasks %}{{ task_row(task,'late') }}{% endfor %}</ul>
+      {% if data.overdue > data.overdue_tasks|length %}<a class="dash-more" href="{{ url_for('tasks.received_tasks') }}">Показать все на доске {{ icon('arrow',16) }}</a>{% endif %}
+    {% else %}<p class="dash-empty">{{ icon('check',20) }}Просроченных поручений нет.</p>{% endif %}
+  </section>
+  <section class="card dash-panel" aria-labelledby="dash-soon">
+    <div class="dash-panel-head"><h2 id="dash-soon">{{ icon('clock',22) }}Ближайшие сроки</h2><span class="badge priority-high">{{ data.soon }}</span></div>
+    {% if data.upcoming %}<ul class="dash-list">{% for task in data.upcoming %}{{ task_row(task,'soon') }}{% endfor %}</ul>
+      {% if data.soon > data.upcoming|length %}<a class="dash-more" href="{{ url_for('tasks.received_tasks') }}">Показать все на доске {{ icon('arrow',16) }}</a>{% endif %}
+    {% else %}<p class="dash-empty">{{ icon('check',20) }}В ближайшие {{ data.soon_days }} дней сроков нет.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

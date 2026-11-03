@@ -1,6 +1,6 @@
 {% import 'components/ui.html' as ui %}
 {% from 'components/icons.html' import icon %}
-<div data-board-root data-csrf-token="{{ csrf_token() }}" data-user-id="{{ current_user.id }}" data-refresh-url="{{ url_for(list_endpoints[direction],view='board',fragment='board',scope=completed_scope) }}" data-direction="{{ direction }}" data-total="{{ pagination.total }}" data-counts="{{ counts|tojson|forceescape }}">
+<div data-board-root data-csrf-token="{{ csrf_token() }}" data-user-id="{{ current_user.id }}" data-refresh-url="{{ url_for(list_endpoints[direction],view='board',fragment='board',scope=completed_scope,search=(search|default('')) or none) }}" data-direction="{{ direction }}" data-total="{{ pagination.total }}" data-counts="{{ counts|tojson|forceescape }}">
   <div class="task-board{% if direction == 'completed' %} task-board-closed{% endif %}" role="region" aria-label="Доска задач" aria-describedby="board-help" tabindex="-1">
     {% for group in board_groups %}
     <section class="board-column" data-group="{{ group.key }}" data-statuses="{{ group.statuses|tojson|forceescape }}" aria-labelledby="column-{{ group.key }}">

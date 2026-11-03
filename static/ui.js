@@ -295,3 +295,30 @@
     });
   }
 })();
+
+/* Оформление: индикатор прокрутки, тень шапки и подсветка карточек за курсором. Только внешний вид. */
+(() => {
+  "use strict";
+  const bar = document.createElement("div");
+  bar.id = "scroll-progress";
+  bar.setAttribute("aria-hidden", "true");
+  document.body.prepend(bar);
+  const header = document.querySelector(".topbar-authenticated");
+  let queued = false;
+  const update = () => {
+    queued = false;
+    const scrollable = document.documentElement.scrollHeight - innerHeight;
+    bar.style.width = (scrollable > 0 ? Math.min(100, scrollY / scrollable * 100) : 0) + "%";
+    if (header) header.classList.toggle("is-scrolled", scrollY > 8);
+  };
+  addEventListener("scroll", () => { if (!queued) { queued = true; requestAnimationFrame(update); } }, { passive: true });
+  addEventListener("resize", update, { passive: true });
+  update();
+  document.addEventListener("pointermove", event => {
+    const card = event.target.closest?.(".dash-kpi");
+    if (!card) return;
+    const box = card.getBoundingClientRect();
+    card.style.setProperty("--mx", (event.clientX - box.left) + "px");
+    card.style.setProperty("--my", (event.clientY - box.top) + "px");
+  }, { passive: true });
+})();

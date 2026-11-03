@@ -23,9 +23,18 @@
   <a href="{{ url_for(list_endpoints[direction], scope='sent', view='board') }}"{% if completed_scope == 'sent' %} aria-current="page"{% endif %}>Другим отделам</a>
 </nav>
 {% endif %}
+<form id="task-search-form" class="task-search card" method="get" role="search" action="{{ url_for(list_endpoints[direction]) }}" aria-label="Поиск по задачам">
+  {% if completed_scope %}<input type="hidden" name="scope" value="{{ completed_scope }}">{% endif %}
+  {% if view == 'list' %}<input type="hidden" name="view" value="list">{% endif %}
+  <label class="task-search-field" for="task-search-input"><span class="sr-only">Поиск по названию, описанию или номеру</span>{{ icon('search',20) }}<input id="task-search-input" type="search" name="search" value="{{ search|default('') }}" maxlength="80" placeholder="Название, описание или номер задачи" autocomplete="off"></label>
+  <button type="submit" class="button">Найти</button>
+  {% if search|default('') %}<a class="button secondary-button" href="{{ url_for(list_endpoints[direction], scope=completed_scope, view=('list' if view == 'list' else none)) }}">Сбросить</a>{% endif %}
+  <a class="button secondary-button task-export" href="{{ url_for('tasks.export_tasks', direction=direction, scope=completed_scope, search=(search|default('')) or none) }}">{{ icon('download',18) }}Выгрузить CSV</a>
+</form>
 <div class="task-list-heading">
   <h2 class="sr-only">{{ list_labels[direction] }}</h2>
   <p class="task-direction-help">{% if current_user.role == 'admin' %}Поручения всех отделов. Участники указаны на карточках.{% elif direction == 'received' %}Поручения, которые выполняет наш отдел.{% elif direction == 'sent' %}Поручения, которые наш отдел отправил другим отделам.{% else %}{{ 'Завершённые поручения нашему отделу.' if completed_scope == 'received' else 'Завершённые поручения нашего отдела другим отделам.' }}{% endif %}</p>
+  {% if search|default('') %}<p class="hint">Найдено по запросу «{{ search }}»: {{ pagination.total }}</p>{% endif %}
   <p class="hint">{{ 'В выбранном направлении' if completed_scope else 'Всего' }}: {{ pagination.total }}{% if view == 'list' and pagination.pages > 1 %} · Страница {{ pagination.page }} из {{ pagination.pages }}{% endif %}</p>
 </div>
 {% if view == 'board' %}{% include 'tasks/board.html' %}
@@ -37,8 +46,8 @@
 </section>
 {% if pagination.pages > 1 %}
 {{ ui.pagination(pagination.page, pagination.pages,
-url_for(list_endpoints[direction], view='list', scope=completed_scope, page=pagination.prev_num) if pagination.has_prev else none,
-url_for(list_endpoints[direction], view='list', scope=completed_scope, page=pagination.next_num) if pagination.has_next else none) }}
+url_for(list_endpoints[direction], view='list', scope=completed_scope, page=pagination.prev_num, search=(search|default('')) or none) if pagination.has_prev else none,
+url_for(list_endpoints[direction], view='list', scope=completed_scope, page=pagination.next_num, search=(search|default('')) or none) if pagination.has_next else none) }}
 {% endif %}
 {% endif %}
 {% if not preview_mode|default(false) %}<script src="{{ url_for('static', filename='tasks.js') }}" defer></script>{% endif %}

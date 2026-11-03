@@ -145,6 +145,35 @@ def update_account(*, actor, user_id, full_name, username, password="", role=Non
     return user
 
 
+MIN_PASSWORD_LENGTH = 8
+
+
+def change_own_password(*, user_id, current_password, new_password, repeat_password):
+    """Сотрудник меняет собственный пароль; старая сессия остаётся только у этого входа."""
+    user = db.session.execute(select(User).where(User.id == user_id).with_for_update(key_share=True)
+        .execution_options(populate_existing=True)).scalar_one_or_none()
+    if not is_platform_user(user):
+        raise PermissionError("Учётная запись недоступна")
+    if not all(isinstance(value, str) for value in (current_password, new_password, repeat_password)):
+        raise AccountError("Некорректный пароль", "new_password")
+    if not user.check_password(current_password):
+        raise AccountError("Текущий пароль указан неверно", "current_password")
+    if len(new_password) < MIN_PASSWORD_LENGTH:
+        raise AccountError(f"Новый пароль должен быть не короче {MIN_PASSWORD_LENGTH} символов", "new_password")
+    if len(new_password) > 128:
+        raise AccountError("Новый пароль слишком длинный", "new_password")
+    if new_password != repeat_password:
+        raise AccountError("Пароли не совпадают", "repeat_password")
+    if new_password == current_password:
+        raise AccountError("Новый пароль должен отличаться от текущего", "new_password")
+    before = account_snapshot(user)
+    user.set_password(new_password)
+    db.session.flush()
+    record_admin_event("account_updated", "user", user.id, before=before,
+        after=dict(account_snapshot(user), password_changed=True), actor=user)
+    return user
+
+
 def set_account_blocked(*, actor, user_id, blocked):
     if user_id is None:
         raise LookupError("Сотрудник не найден")

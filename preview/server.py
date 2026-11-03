@@ -191,6 +191,24 @@ def create_preview_app(*, testing: bool = False) -> Flask:
 
     app.add_url_rule("/login", endpoint="auth.login", view_func=login, methods=["GET", "POST"])
 
+    @app.get("/tasks/export.csv", endpoint="tasks.export_tasks")
+    def export_stub():
+        return make_response(render_template_string(
+            SHELL, title="Выгрузка недоступна",
+            message="Демонстрация не выгружает данные.",
+            catalog=False, components=False), 409)
+
+    @app.get("/dashboard", endpoint="dashboard.dashboard")
+    def dashboard_stub():
+        return redirect(url_for("tasks.received_tasks"))
+
+    @app.route("/account/password", endpoint="auth.change_password", methods=["GET", "POST"])
+    def change_password_stub():
+        return make_response(render_template_string(
+            SHELL, title="Смена пароля",
+            message="Демонстрация не меняет пароли.",
+            catalog=False, components=False), 409)
+
     @app.post("/logout", endpoint="auth.logout")
     def logout():
         return make_response(render_template_string(

@@ -13,7 +13,7 @@ class AccountAccessTests(PortalCase):
         for name, location in (("root", "/tasks/received"), ("head", "/tasks/received"), ("employee", "/tasks/received")):
             client = self.app.test_client()
             self.assertEqual(302, self.login(name, client=client, follow=False).status_code)
-            self.assertTrue(client.get("/").location.endswith(location))
+            self.assertTrue(client.get("/").location.endswith("/dashboard"))
             self.assertEqual(200, client.get(location).status_code)
 
     def test_employee_and_head_cannot_use_any_account_action_directly(self):
