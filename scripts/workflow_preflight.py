@@ -18,7 +18,10 @@ from sqlalchemy.pool import NullPool
 ROOT = Path(__file__).resolve().parents[1]
 BASE = "20261024_07"
 INTERMEDIATE = "20261028_08"
-HEAD = "20261028_09"
+ASSIGNEES = "20261028_09"
+HEAD = "20261102_10"
+KNOWN = (BASE, INTERMEDIATE, ASSIGNEES, HEAD)
+ASSIGNEE_SCHEMA = (ASSIGNEES, HEAD)
 WORKING = ("tasks", "task_comments", "task_events", "task_attachments",
            "task_notifications", "task_translations", "task_assignees")
 REFERENCE = ("users", "departments", "task_categories", "system_settings", "admin_audit_events")
@@ -55,7 +58,7 @@ def valid_migration_graph(directory=None):
             if values.get("branch_labels") is not None or values.get("depends_on") is not None:
                 return False
             revisions[revision] = parent
-        if revisions.get(HEAD) != INTERMEDIATE or revisions.get(INTERMEDIATE) != BASE:
+        if revisions.get(HEAD) != ASSIGNEES or revisions.get(ASSIGNEES) != INTERMEDIATE or revisions.get(INTERMEDIATE) != BASE:
             return False
         parents = {parent for parent in revisions.values() if parent is not None}
         if set(revisions) - parents != {HEAD}:
@@ -76,7 +79,7 @@ def schema_matches(inspector, revision):
     columns = {c["name"]: c for c in inspector.get_columns("tasks")}
     if not {"status", "due_at", "sent_at", "revision"} <= set(columns):
         return False
-    if revision != HEAD and "task_assignees" in inspector.get_table_names():
+    if revision not in ASSIGNEE_SCHEMA and "task_assignees" in inspector.get_table_names():
         return False
     if revision == BASE:
         return not NEW_COLUMNS & set(columns)
@@ -89,7 +92,7 @@ def schema_matches(inspector, revision):
     if default != "new":
         return False
     checks = {c["name"]: c["sqltext"] for c in inspector.get_check_constraints("tasks")}
-    required = REQUIRED_CHECKS if revision == HEAD else REQUIRED_CHECKS - {"ck_tasks_legacy_assignee_unused"} | {"ck_tasks_new_unassigned"}
+    required = REQUIRED_CHECKS if revision in ASSIGNEE_SCHEMA else REQUIRED_CHECKS - {"ck_tasks_legacy_assignee_unused"} | {"ck_tasks_new_unassigned"}
     if not required <= set(checks):
         return False
     # PostgreSQL reflects IN as ANY/ARRAY, with casts; compare its literal set.
@@ -100,7 +103,7 @@ def schema_matches(inspector, revision):
     unique = inspector.get_unique_constraints("tasks") + [i for i in inspector.get_indexes("tasks") if i.get("unique")]
     if not any(c.get("column_names") == ["creation_key"] for c in unique):
         return False
-    if revision == HEAD:
+    if revision in ASSIGNEE_SCHEMA:
         if "task_assignees" not in inspector.get_table_names():
             return False
         members = {c["name"]: c for c in inspector.get_columns("task_assignees")}
@@ -121,6 +124,8 @@ def schema_matches(inspector, revision):
             expected = {"task_assignees_not_new", "tasks_new_without_assignees"}
         if not expected <= triggers:
             return False
+    if revision == HEAD and "crm_events" not in inspector.get_table_names():
+        return False
     foreign_keys = inspector.get_foreign_keys("task_attachments")
     return any(c["constrained_columns"] == ["comment_id", "task_id"] and
         c["referred_table"] == "task_comments" and c["referred_columns"] == ["id", "task_id"]
@@ -140,7 +145,7 @@ def _inspect_connection(connection):
     if not versions and not tables - {"alembic_version"}:
         result.update(result="ready_install", revision="none", needs_migration=True)
         return result
-    if len(versions) != 1 or versions[0] not in (BASE, INTERMEDIATE, HEAD):
+    if len(versions) != 1 or versions[0] not in KNOWN:
         # Do not print arbitrary database strings as purported revision IDs.
         result["revision"] = "unexpected" if versions else "none"
         result["issues"].append("unexpected_revision" if versions else "unversioned_schema")
@@ -149,7 +154,7 @@ def _inspect_connection(connection):
     result.update(revision=revision, needs_migration=revision != HEAD)
     if any(result["counts"].values()):
         result["issues"].append("working_records_present")
-    required_tables = set(WORKING + REFERENCE) - ({"task_assignees"} if revision != HEAD else set())
+    required_tables = set(WORKING + REFERENCE) - ({"task_assignees"} if revision not in ASSIGNEE_SCHEMA else set())
     if not required_tables <= tables:
         result["issues"].append("incomplete_schema")
         return result

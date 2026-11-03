@@ -248,7 +248,8 @@ class PreflightCommandTests(unittest.TestCase):
             (root / "base.py").write_text(f"revision={gate.BASE!r}\ndown_revision=None\nraise RuntimeError('DO NOT EXECUTE')", encoding="utf-8")
             head = root / "head.py"
             (root / "middle.py").write_text(f"revision={gate.INTERMEDIATE!r}\ndown_revision={gate.BASE!r}\n", encoding="utf-8")
-            head.write_text(f"revision={gate.HEAD!r}\ndown_revision={gate.INTERMEDIATE!r}\n", encoding="utf-8")
+            (root / "assignees.py").write_text(f"revision={gate.ASSIGNEES!r}\ndown_revision={gate.INTERMEDIATE!r}\n", encoding="utf-8")
+            head.write_text(f"revision={gate.HEAD!r}\ndown_revision={gate.ASSIGNEES!r}\n", encoding="utf-8")
             self.assertTrue(gate.valid_migration_graph(root))
             (root / "fork.py").write_text(f"revision='unexpected'\ndown_revision={gate.BASE!r}\n", encoding="utf-8")
             self.assertFalse(gate.valid_migration_graph(root))

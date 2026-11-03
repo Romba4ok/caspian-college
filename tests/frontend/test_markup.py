@@ -499,7 +499,8 @@ class PeopleMarkupCase(unittest.TestCase):
         self.assertIn("Администратор (демо)",html)
         html=self.client.get("/admin/users?role=admin").text
         self.assertNotIn("/admin/users/3/block",html)
-        self.assertNotIn("/delete",html)
+        self.assertNotIn("/admin/users/3/delete",html)  # единственный администратор не удаляется
+        self.assertIn("/admin/users/20/delete",html)  # обычные учётные записи удаляются с восстановлением
         self.assertNotIn('value="admin"',self.client.get("/admin/users/new?role=admin").text)
         self.assertIn('name="role" value="admin"',self.client.get("/admin/users/3/edit?role=admin").text)
 

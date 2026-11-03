@@ -111,7 +111,7 @@ class SimplePermissionTests(PortalCase):
 
     def test_legacy_marker_does_not_replace_actual_dispatch(self):
         with self.app.app_context():
-            task = SimpleNamespace(status="new", sent_at=None, is_legacy_dispatched=True,
+            task = SimpleNamespace(status="new", sent_at=None, is_legacy_dispatched=True, is_deleted=False,
                 sender_department_id=self.department_id, recipient_department_id=self.other_department_id)
             self.assertFalse(p.is_task_dispatched(task))
             for name in ("employee", "receiver", "receiver-head", "outsider"):

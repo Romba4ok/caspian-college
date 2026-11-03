@@ -614,16 +614,17 @@ def create_preview_app(*, testing: bool = False) -> Flask:
             creating=form_mode and current is None
             def render(code=200):
                 departments_by_id={d["id"]:SimpleNamespace(**d) for d in departments}
-                people=[SimpleNamespace(**row,department=departments_by_id.get(row["department_id"])) for row in rows]
+                deleted_scope=not staff and request.args.get("scope")=="deleted"
+                people=[SimpleNamespace(**{"is_deleted":False,**row},department=departments_by_id.get(row["department_id"])) for row in rows]
                 selected=next((person for person in people if person.id==user_id),None)
                 context=dict(error=general,form_errors=errors,account_notice=state["notices"].get(request.args.get("notice"),""))
                 if staff:
                     context.update(department=departments_by_id[1],employee=selected,
-                        employees=[person for person in people if person.role=="employee" and person.department_id==1],
+                        employees=[person for person in people if person.role=="employee" and person.department_id==1 and not person.is_deleted],
                         active_assignments={row["id"]:row["assignments"] for row in rows},
                         may_create=not departments_by_id[1].is_archived)
                 else:
-                    context.update(user=selected,users=people,
+                    context.update(user=selected,users=[person for person in people if person.is_deleted==deleted_scope],deleted=deleted_scope,
                         roles={"admin":ROLE_LABELS["admin"]} if selected and selected.role=="admin" else {key:ROLE_LABELS[key] for key in ("head","employee")},
                         departments=[d for d in departments_by_id.values() if not d.is_archived or selected and selected.department_id==d.id])
                     if not form_mode:
@@ -676,6 +677,18 @@ def create_preview_app(*, testing: bool = False) -> Flask:
                 else:
                     rows.append(dict(id=max([r["id"] for r in rows]+[100])+1,is_blocked=False,assignments=0,**values))
                 notice="Учётная запись сохранена."
+            elif operation=="restore":
+                current["is_deleted"]=False
+                notice="Учётная запись возвращена в список. Доступ включает администратор."
+            elif operation=="delete":
+                if current["role"]=="admin":
+                    general="Нельзя удалить единственного администратора."
+                    return render(400)
+                if current["assignments"]:
+                    general="Сначала переназначьте активные задачи сотрудника, затем удалите его."
+                    return render(409)
+                current["is_deleted"]=True
+                notice="Сотрудник удалён из списка. Его задачи и история сохранены"
             else:
                 if current["role"]=="admin":
                     general="Нельзя отключить единственного администратора."
@@ -697,7 +710,7 @@ def create_preview_app(*, testing: bool = False) -> Flask:
             view_func=lambda staff=staff:people_page(staff,operation="form"),methods=["GET","POST"])
         app.add_url_rule(prefix+"/<int:user_id>/edit",endpoint=namespace+"edit",
             view_func=lambda user_id,staff=staff:people_page(staff,user_id,"form"),methods=["GET","POST"])
-        for operation in (("disable",) if staff else ("block","unblock")):
+        for operation in (("disable","delete") if staff else ("block","unblock","delete","restore")):
             app.add_url_rule(prefix+"/<int:user_id>/"+operation,endpoint=namespace+operation,
                 view_func=lambda user_id,staff=staff,operation=operation:people_page(staff,user_id,operation),methods=["POST"])
     # Older preview links remain local GET redirects, never production aliases.
@@ -926,7 +939,8 @@ def create_preview_app(*, testing: bool = False) -> Flask:
 
 
 # Fixed workspace boundary: every real-app preview owns a new disposable subfolder.
-INTEGRATION_RUNTIME_ROOT = Path(r"D:/Коды/Ccu_platform/spec-kit-main/ai/specs/2026.10.28_11-33_platform-frontend/artifacts/runtime")
+import tempfile as _tempfile
+INTEGRATION_RUNTIME_ROOT = Path(_tempfile.gettempdir()) / "caspian-integration-runtime"
 SYNTHETIC_PASSWORD = "Caspian-demo-2026!"
 
 
@@ -942,7 +956,7 @@ def create_integrated_app():
               "ADMIN_USERNAME", "ADMIN_FULL_NAME", "FLASK_APP")
     if any(os.environ.get(key) for key in unsafe):
         raise RuntimeError("Integrated preview refuses inherited application configuration; use a clean child environment")
-    if ROOT.name != "frontend-integration-20261029" or not (ROOT / "app" / "assignment_schema.py").is_file():
+    if not (ROOT / "app" / "assignment_schema.py").is_file():
         raise RuntimeError("Integrated preview requires the isolated schema-09 integration checkout")
     allowed = INTEGRATION_RUNTIME_ROOT.resolve()
     allowed.mkdir(parents=True, exist_ok=True)

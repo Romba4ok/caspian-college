@@ -159,7 +159,7 @@ class MigrationCases(MigrationDatabase):
         self.upgrade("20261024_04")
         with db.engine.begin() as conn:
             conn.execute(self.table("users").insert().values(full_name="Second", username="second-admin", password_hash="keep", role="admin"))
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+        result = self.cli(["db", "upgrade"])
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("ровно один", result.output)
         self.assertNotIn("normalized_name", {c["name"] for c in sa.inspect(db.engine).get_columns("departments")})
@@ -170,7 +170,7 @@ class MigrationCases(MigrationDatabase):
         original = self.rows("departments")[0]
         with db.engine.begin() as conn:
             conn.execute(self.table("departments").insert().values(slug="conflicting", name=" " + original["name"].upper() + " "))
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+        result = self.cli(["db", "upgrade"])
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("конфликтующие", result.output)
         self.assertNotIn("task_categories", sa.inspect(db.engine).get_table_names())
@@ -226,7 +226,7 @@ class SQLiteApprovalMigrations(MigrationCases, unittest.TestCase):
             connection.execute("PRAGMA foreign_keys=ON")
         sa.event.listen(db.engine, "connect", enable_foreign_keys)
         db.engine.dispose()
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+        result = self.cli(["db", "upgrade"])
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("foreign_keys=ON", result.output)
         self.assertEqual(before, {name: self.rows(name) for name in before})
@@ -238,7 +238,7 @@ class SQLiteApprovalMigrations(MigrationCases, unittest.TestCase):
             connection.execute("PRAGMA foreign_keys=ON")
         sa.event.listen(db.engine, "connect", enable_foreign_keys)
         db.engine.dispose()
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+        result = self.cli(["db", "upgrade"])
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("foreign_keys=ON", result.output)
         self.assertEqual(before, {name: self.rows(name) for name in before})

@@ -86,8 +86,29 @@ class MigrationDatabase:
             self.control.dispose()
         self.temp.cleanup()
 
+    def cli(self, args):
+        """Run a Flask CLI command; Flask-Migrate reports guard errors through its logger, so include log text."""
+        import logging
+        from types import SimpleNamespace
+
+        class Collect(logging.Handler):
+            def __init__(self):
+                super().__init__()
+                self.lines = []
+
+            def emit(self, record):
+                self.lines.append(record.getMessage())
+
+        logger, handler = logging.getLogger("flask_migrate"), Collect()
+        logger.addHandler(handler)
+        try:
+            result = self.app.test_cli_runner().invoke(args=list(args), catch_exceptions=False)
+        finally:
+            logger.removeHandler(handler)
+        return SimpleNamespace(exit_code=result.exit_code, output=chr(10).join([result.output, *handler.lines]))
+
     def upgrade(self, revision="head"):
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade", revision], catch_exceptions=False)
+        result = self.cli(["db", "upgrade", revision])
         self.assertEqual(0, result.exit_code, result.output)
 
     def table(self, name):

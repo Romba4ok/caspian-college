@@ -175,7 +175,7 @@ class SimpleMigrationCases(MigrationDatabase):
         statements=[]
         def capture(*args):statements.append(args[2])
         sa.event.listen(db.engine,"before_cursor_execute",capture)
-        try:result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+        try:result = self.cli(["db", "upgrade"])
         finally:sa.event.remove(db.engine,"before_cursor_execute",capture)
         for sql in statements:
             self.assertIsNone(re.match(r"\s*(INSERT|DELETE|TRUNCATE|DROP|ALTER|CREATE)\b",sql,re.I),sql)
@@ -196,7 +196,7 @@ class SimpleMigrationCases(MigrationDatabase):
                 raise RuntimeError("synthetic schema failure")
         sa.event.listen(db.engine, "before_cursor_execute", fail_schema)
         try:
-            result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+            result = self.cli(["db", "upgrade"])
             self.assertNotEqual(0, result.exit_code)
             self.assertIn("synthetic schema failure", result.output)
         finally:
@@ -211,7 +211,7 @@ class SimpleMigrationCases(MigrationDatabase):
         with db.engine.begin() as conn:
             conn.execute(self.table("tasks").insert().values(**data))
         before = self.rows("tasks")
-        result = self.app.test_cli_runner().invoke(args=["db", "downgrade", "20261024_07"], catch_exceptions=False)
+        result = self.cli(["db", "downgrade", "20261024_07"])
         self.assertNotEqual(0, result.exit_code)
         self.assertEqual(HEAD, self.revision())
         self.assertEqual(before, self.rows("tasks"))
@@ -230,7 +230,7 @@ class SQLiteSimpleMigrations(SimpleMigrationCases, unittest.TestCase):
             connection.execute("PRAGMA foreign_keys=ON")
         sa.event.listen(db.engine, "connect", enable)
         db.engine.dispose()
-        result = self.app.test_cli_runner().invoke(args=["db", "upgrade"], catch_exceptions=False)
+        result = self.cli(["db", "upgrade"])
         self.assertNotEqual(0, result.exit_code)
         self.assertIn("foreign_keys=ON", result.output)
         self.assertEqual("20261024_07", self.revision())
