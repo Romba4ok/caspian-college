@@ -328,3 +328,12 @@
  .button::after { display:none; }
  #scroll-progress { transition:none; }
 }
+
+/* ══ Баннеры на телефоне: колонкой, без наложений ═══════════════════════ */
+@media(max-width:640px) {
+ .portal-app .workspace-hero { flex-direction:column; align-items:stretch; gap:16px; padding:22px 20px; }
+ .portal-app .workspace-hero h1 { font-size:28px; overflow-wrap:break-word; hyphens:auto; }
+ .portal-app .workspace-hero>.button, .portal-app .workspace-hero .task-create { width:100%; justify-content:center; }
+ .portal-app .workspace-hero .eyebrow, .portal-app .workspace-hero .task-heading-kicker { max-width:100%; }
+ .portal-app .workspace-hero>div:first-child { flex:0 0 auto; }
+}
