@@ -1,0 +1,603 @@
+/* Caspian College — слой оформления: сотрудники, пользователи, отделы, журнал, отчёты.
+   Подключается после caspian-reference.css; только оформление, без изменения разметки-контрактов.
+   Тема «Графит и коралл»: графит (--g-*), коралл (--c-*), статусные цвета — только локально.
+   Структура: 1 токены и анимации · 2 шапка раздела · 3 метрики · 4 таблицы людей · 5 отделы ·
+   6 формы · 7 журнал · 8 отчёты · 9 общие блоки · 10 адаптив · 11 reduced-motion. */
+
+/* ══ 1. Токены слоя и анимации появления ═══════════════════════════════ */
+.portal-app .people-workspace {
+ --adm-ink:#1E2226; --adm-ink2:#3C434A; --adm-mute:#5A646C;
+ --adm-coral-ink:#A8321C; --adm-green-ink:#0F6B47; --adm-amber-ink:#8A5200; --adm-red-ink:#A91F35; --adm-blue-ink:#1B63B5;
+ --adm-sticky:0px;
+}
+@keyframes adm-rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+@keyframes adm-float { from { transform:translate3d(0,0,0); } to { transform:translate3d(-26px,-18px,0) scale(1.06); } }
+@keyframes adm-pop { from { opacity:0; transform:translateY(10px) scale(.97); } to { opacity:1; transform:none; } }
+/* theme-shell.css задаёт .button градиент коралла и перекрашивает вторичные кнопки: возвращаем белый вид в наших разделах */
+.portal-app .people-workspace .secondary-button { background:#fff; color:var(--g-700); border-color:var(--line-strong); box-shadow:var(--sh-xs); }
+.portal-app .people-workspace .secondary-button:hover { background:var(--canvas); color:var(--g-900); border-color:var(--g-400); box-shadow:var(--sh-sm); }
+.portal-app .people-workspace > :not(dialog) { animation:adm-rise .6s var(--ease) both; }
+.portal-app .people-workspace > :nth-child(2) { animation-delay:.05s; }
+.portal-app .people-workspace > :nth-child(3) { animation-delay:.1s; }
+.portal-app .people-workspace > :nth-child(4) { animation-delay:.15s; }
+.portal-app .people-workspace > :nth-child(5) { animation-delay:.2s; }
+.portal-app .people-workspace > :nth-child(6) { animation-delay:.25s; }
+.portal-app .people-workspace > :nth-child(n+7) { animation-delay:.3s; }
+
+/* ══ 2. Шапка раздела (единый компонент workspace-hero) ════════════════ */
+.portal-app .people-workspace .workspace-hero {
+ --hero-glyph:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,.11)' stroke-width='.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+ min-height:150px; padding:34px 44px; gap:28px; border-radius:28px;
+ background:
+  var(--hero-glyph) right 270px center / 168px no-repeat,
+  linear-gradient(118deg,transparent 0 58%,rgba(255,255,255,.045) 58% 70%,transparent 70%),
+  radial-gradient(circle at center,rgba(255,255,255,.085) 1.1px,transparent 1.7px) 0 0 / 24px 24px,
+  radial-gradient(70% 170% at 104% -10%,rgba(238,106,78,.55),transparent 62%),
+  linear-gradient(105deg,#1B1E21 0%,#262A2E 40%,#4A2A25 72%,#8F2B1A 100%);
+ box-shadow:var(--sh-lg),inset 0 1px 0 rgba(255,255,255,.08);
+}
+.portal-app .departments-workspace .workspace-hero { --hero-glyph:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,.11)' stroke-width='.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='2'/%3E%3Cpath d='M9 21v-4h6v4M8 7h1M15 7h1M8 12h1M15 12h1'/%3E%3C/svg%3E"); }
+.portal-app .reports-workspace .workspace-hero { --hero-glyph:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,.11)' stroke-width='.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20V10M12 20V4M20 20v-7'/%3E%3C/svg%3E"); }
+.portal-app .audit-workspace .workspace-hero { --hero-glyph:none; }
+.portal-app .people-workspace .workspace-hero:not(:has(> .button,> .badge)) { background-position:right 56px center,0 0,0 0,0 0,0 0; }
+.portal-app .people-workspace .workspace-hero::before {
+ content:""; z-index:-1; top:auto; right:-96px; bottom:-200px; width:380px; height:380px; border-radius:50%;
+ background:none; filter:none; opacity:1; border:1.5px solid rgba(255,255,255,.14);
+ box-shadow:0 0 0 44px rgba(255,255,255,.035),0 0 0 88px rgba(255,255,255,.022);
+ animation:adm-float 16s ease-in-out infinite alternate;
+}
+.portal-app .people-workspace .workspace-hero::after {
+ content:""; z-index:0; left:44px; right:auto; bottom:0; width:96px; height:5px; border-radius:6px 6px 0 0;
+ background:linear-gradient(90deg,#FFB36B,#EE6A4E);
+}
+.portal-app .people-workspace .workspace-hero h1 { font-size:clamp(30px,3.4vw,42px); line-height:1.1; letter-spacing:-.045em; text-wrap:balance; }
+.portal-app .people-workspace .workspace-hero p { margin-top:10px; font-size:15px; color:#D9DDE0; }
+.portal-app .people-workspace .workspace-hero .eyebrow { margin-bottom:12px; }
+.portal-app .people-workspace .workspace-hero > .button { min-height:48px; padding:12px 22px; font-size:14px; }
+/* основное действие в шапке — белая кнопка (читается на любой части градиента) */
+.portal-app .people-workspace .workspace-hero > .button:not(.secondary-button) { background:#fff; color:#A5311B; border-color:#fff; box-shadow:0 14px 28px -12px rgba(0,0,0,.55); }
+.portal-app .people-workspace .workspace-hero > .button:not(.secondary-button):hover { background:#FFF3EF; color:#8F2B1A; }
+.portal-app .people-workspace .workspace-hero > .secondary-button { background:rgba(255,255,255,.14); color:#fff; border:1px solid rgba(255,255,255,.5); box-shadow:none; }
+.portal-app .people-workspace .workspace-hero > .secondary-button:hover { background:rgba(255,255,255,.26); color:#fff; border-color:#fff; }
+.portal-app .people-workspace .workspace-hero .activity-hero-symbol { width:58px; height:58px; border-radius:50%; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.35); color:#FFD2C6; }
+.portal-app .people-workspace .workspace-hero .audit-readonly { padding:9px 14px; border-radius:99px; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.4); font-weight:700; }
+.portal-app .people-workspace .workspace-hero :is(a,button):focus-visible { outline:3px solid #fff; outline-offset:3px; }
+
+.people-back { gap:8px; padding:0 14px 0 10px; margin:0 0 6px -10px; border-radius:99px; color:var(--adm-ink2); font-weight:650; text-decoration:none; transition:background .25s var(--ease),color .2s,transform .25s var(--ease); }
+.people-back:hover { background:#fff; color:var(--c-700); transform:translateX(-3px); box-shadow:var(--sh-xs); }
+
+/* ══ 3. Плитки показателей разделов управления ═════════════════════════ */
+.portal-app .people-metrics { gap:16px; margin-bottom:24px; }
+.portal-app .people-metrics > div {
+ --m:var(--c-500); --m-bg:var(--c-50); --m-ink:#BF3B25; --m-line:#EE6A4E40;
+ --m-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+ position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px 12px; min-height:104px; padding:20px 24px 20px 88px;
+ border:1px solid var(--line); border-radius:20px; background:#fff; box-shadow:inset 0 -3px 0 var(--m),var(--sh-sm);
+ transition:transform .4s var(--ease),box-shadow .4s var(--ease);
+}
+.portal-app .people-metrics > div::before { content:""; position:absolute; left:22px; top:50%; width:48px; height:48px; margin-top:-24px; border-radius:15px; background:var(--m-bg); border:1px solid var(--m-line); transition:transform .5s var(--spring); }
+.portal-app .people-metrics > div::after { content:""; position:absolute; left:22px; top:50%; width:48px; height:48px; margin-top:-24px; background:var(--m-ink); -webkit-mask:var(--m-icon) center / 24px no-repeat; mask:var(--m-icon) center / 24px no-repeat; transition:transform .5s var(--spring); }
+.portal-app .people-metrics > div:hover { transform:translateY(-3px); box-shadow:inset 0 -3px 0 var(--m),var(--sh-md); }
+.portal-app .people-metrics > div:hover::before, .portal-app .people-metrics > div:hover::after { transform:scale(1.08) rotate(-5deg); }
+.portal-app .people-metrics > div:nth-child(2) { --m:var(--green); --m-bg:var(--green-bg); --m-ink:#0F6B47; --m-line:#1F9D6B40;
+ --m-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='m8 12 3 3 5-6'/%3E%3C/svg%3E"); }
+.portal-app .people-metrics > div:nth-child(3) { --m:var(--amber); --m-bg:var(--amber-bg); --m-ink:#8A5200; --m-line:#D9891A4d;
+ --m-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='5' y='10' width='14' height='11' rx='2'/%3E%3Cpath d='M8 10V7a4 4 0 0 1 8 0v3'/%3E%3C/svg%3E"); }
+.portal-app .departments-workspace .people-metrics > div:first-child { --m-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='2'/%3E%3Cpath d='M9 21v-4h6v4M8 7h1M15 7h1M8 12h1M15 12h1'/%3E%3C/svg%3E"); }
+.portal-app .departments-workspace .people-metrics > div:nth-child(3) { --m:var(--g-500); --m-bg:#ECEEF0; --m-ink:#3C434A; --m-line:#9AA2A855;
+ --m-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2'/%3E%3C/svg%3E"); }
+.portal-app .people-metrics > div:first-child, .portal-app .people-metrics > div:nth-child(n) { background:#fff; border-color:var(--line); }
+.portal-app .people-metrics dt, .portal-app .people-metrics > div:first-child dt { grid-column:1; grid-row:1; font-size:14px; font-weight:650; color:var(--adm-ink2); line-height:1.35; }
+.portal-app .people-metrics dd { grid-column:2; grid-row:1; font-size:40px; font-weight:800; line-height:1; letter-spacing:-.05em; color:var(--adm-ink); font-variant-numeric:tabular-nums; }
+
+/* ══ 4. Таблицы людей ══════════════════════════════════════════════════ */
+.portal-app .people-filters { display:inline-flex; flex-wrap:wrap; gap:4px; width:fit-content; max-width:100%; padding:5px; margin:0 0 22px; border-radius:16px; background:#E6E8EB; box-shadow:inset 0 1px 2px rgba(27,30,33,.08); }
+.portal-app .people-filters .button { min-height:44px; padding:10px 22px; font-size:14px; border-radius:12px; }
+.portal-app .people-filters .secondary-button { background:transparent; border-color:transparent; box-shadow:none; color:var(--adm-ink2); }
+.portal-app .people-filters .secondary-button:hover { background:rgba(255,255,255,.75); color:var(--adm-ink); }
+
+.portal-app .people-directory { overflow:clip; border-radius:22px; }
+.portal-app .people-directory-heading { position:relative; padding:22px 28px; background:linear-gradient(180deg,#fff,#FAFBFB); }
+.portal-app .people-directory-heading h2 { display:flex; align-items:center; gap:12px; font-size:20px; letter-spacing:-.02em; }
+.portal-app .people-directory-heading h2::before { content:""; width:6px; height:24px; border-radius:6px; background:linear-gradient(180deg,var(--c-400),var(--c-600)); }
+.portal-app .people-directory-heading .hint { padding:5px 13px; border-radius:99px; background:var(--canvas); border:1px solid var(--line); color:var(--adm-ink2); font-weight:650; font-size:12.5px; }
+.portal-app .people-table thead th {
+ position:sticky; top:var(--adm-sticky); z-index:3; padding:14px 22px; background:#F2F3F5; color:#4D555B; border-bottom:2px solid var(--line-strong);
+ font-size:11.5px; font-weight:750; letter-spacing:.07em; text-transform:uppercase; box-shadow:0 1px 0 rgba(27,30,33,.04);
+}
+.portal-app .people-table tbody td { padding:16px 22px; }
+.portal-app .people-table tbody tr { transition:background-color .25s,box-shadow .25s; }
+.portal-app .people-table tbody tr:hover, .portal-app .people-table tbody tr:focus-within { background:linear-gradient(90deg,var(--c-50),#fff 55%); }
+.portal-app .people-table tbody tr td:first-child { box-shadow:inset 0 0 0 var(--c-500); transition:box-shadow .25s var(--ease); }
+.portal-app .people-table tbody tr:hover td:first-child, .portal-app .people-table tbody tr:focus-within td:first-child { box-shadow:inset 4px 0 0 var(--c-500); }
+.portal-app .people-table tbody tr { animation:adm-rise .5s var(--ease) both; }
+.portal-app .people-table tbody tr:nth-child(1) { animation-delay:.18s; } .portal-app .people-table tbody tr:nth-child(2) { animation-delay:.22s; }
+.portal-app .people-table tbody tr:nth-child(3) { animation-delay:.26s; } .portal-app .people-table tbody tr:nth-child(4) { animation-delay:.30s; }
+.portal-app .people-table tbody tr:nth-child(5) { animation-delay:.34s; } .portal-app .people-table tbody tr:nth-child(6) { animation-delay:.38s; }
+.portal-app .people-table tbody tr:nth-child(n+7) { animation-delay:.42s; }
+
+.portal-app .person-identity { gap:14px; }
+.portal-app .person-identity strong { font-size:15px; font-weight:750; color:var(--adm-ink); letter-spacing:-.01em; }
+.portal-app .person-login { display:inline-block; margin-top:4px; padding:1px 8px; border-radius:6px; background:var(--canvas); color:var(--adm-mute); font:500 12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; overflow-wrap:anywhere; }
+.portal-app .person-avatar { --av:#BF3B25; width:44px; height:44px; border-radius:50%; background:linear-gradient(135deg,color-mix(in srgb,var(--av) 82%,#fff),var(--av)); color:#fff; font-size:17px; font-weight:800; box-shadow:0 0 0 3px #fff,0 0 0 4px color-mix(in srgb,var(--av) 35%,transparent),var(--sh-xs); text-transform:uppercase; transition:transform .4s var(--spring); }
+.portal-app .people-table tr:hover .person-avatar { transform:scale(1.08) rotate(-4deg); }
+.portal-app .avatar-tone-1 { --av:#3A4045; } .portal-app .avatar-tone-2 { --av:#13774F; } .portal-app .avatar-tone-3 { --av:#1B63B5; }
+.portal-app .avatar-tone-4 { --av:#8A5200; } .portal-app .avatar-tone-5 { --av:#6A45B5; }
+
+.role-pill { display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:99px; border:1px solid transparent; font-size:12.5px; font-weight:700; line-height:1.3; }
+.role-pill::before { content:""; width:7px; height:7px; border-radius:2px; background:currentColor; transform:rotate(45deg); }
+.role-pill-employee { background:#EEF0F2; color:#3C434A; border-color:#C4C9CD; }
+.role-pill-head { background:var(--c-50); color:var(--adm-coral-ink); border-color:#EE6A4E55; }
+.role-pill-head::before { border-radius:50%; transform:none; }
+.role-pill-admin { background:#2C3136; color:#fff; border-color:#2C3136; }
+.role-pill-admin::before { border-radius:0; transform:none; clip-path:polygon(50% 0,100% 100%,0 100%); width:8px; height:8px; background:#FFB9A6; }
+.person-dept { display:inline-flex; align-items:center; gap:8px; min-width:0; color:var(--adm-ink2); font-weight:600; }
+.person-dept .icon { flex:none; color:var(--g-500); }
+.person-dept-none { color:var(--adm-mute); font-style:italic; font-weight:500; }
+
+.portal-app .account-enabled { color:#0F6B47; background:var(--green-bg); border-color:#1F9D6B55; }
+.portal-app .account-disabled { color:#8A5200; background:var(--amber-bg); border-color:#D9891A66; }
+.portal-app .badge.account-deleted { margin-left:4px; color:#A91F35; background:var(--red-bg); border-color:#D8374B55; }
+.portal-app .people-table .badge { font-weight:700; }
+.portal-app td[data-label="Активные задачи"] strong { display:inline-grid; place-items:center; min-width:40px; height:34px; padding:0 12px; border-radius:99px; background:#EEF0F2; border:1px solid #C4C9CD; font-size:15px; font-variant-numeric:tabular-nums; }
+
+@media(min-width:768px) {
+ .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(1) { width:25%; } .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(2) { width:16%; }
+ .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(3) { width:19%; } .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(4) { width:12%; }
+ .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(5) { width:28%; }
+ .portal-app .people-table:not(:has(thead th:nth-child(5))) th:nth-child(1) { width:28%; } .portal-app .people-table:not(:has(thead th:nth-child(5))) th:nth-child(2) { width:16%; }
+ .portal-app .people-table:not(:has(thead th:nth-child(5))) th:nth-child(3) { width:15%; } .portal-app .people-table:not(:has(thead th:nth-child(5))) th:nth-child(4) { width:41%; }
+ .portal-app .person-actions .button { flex:none; }
+ .portal-app .people-table:not(.department-table) td { overflow-wrap:break-word; }
+ .portal-app .role-pill { white-space:nowrap; }
+}
+@media(min-width:1024px) and (max-width:1279px) {
+ .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(1) { width:23%; } .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(2) { width:15%; }
+ .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(3) { width:16%; } .portal-app .people-table:has(thead th:nth-child(5)) th:nth-child(5) { width:34%; }
+}
+.portal-app .person-actions { gap:8px; }
+@media(min-width:1280px) { .portal-app .person-actions { flex-wrap:nowrap; } }
+.portal-app .person-actions > .hint { white-space:normal; }
+.portal-app .person-actions .button { min-height:44px; padding:10px 14px; white-space:nowrap; border-radius:12px; font-size:13px; font-weight:700; }
+.portal-app .person-actions .account-disable { color:var(--adm-red-ink); border-color:#F0BCC4; background:#fff; }
+.portal-app .person-actions .account-disable:hover { background:var(--red-bg); border-color:#D8374B; color:#8E1226; }
+.portal-app .person-actions > form:has(.account-disable) { padding-left:8px; border-left:1px solid var(--line-strong); }
+.portal-app .person-actions > .hint { padding:4px 10px; border-radius:99px; background:var(--canvas); color:var(--adm-mute); font-weight:600; }
+.portal-app .people-footnote { padding:14px 18px; border-radius:14px; background:#fff; border:1px solid var(--line); border-left:4px solid var(--c-500); color:var(--adm-ink2); line-height:1.65; }
+.portal-app .people-footnote .icon { flex:none; margin-top:3px; color:var(--c-600); }
+
+/* ══ 5. Отделы: карточки с метаданными ═════════════════════════════════ */
+.portal-app .departments-workspace .people-directory { overflow:visible; border:0; background:transparent; box-shadow:none; }
+.portal-app .departments-workspace .people-directory-heading { padding:6px 4px 18px; border:0; background:transparent; }
+.portal-app .department-table { display:block; }
+.portal-app .department-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+.portal-app .department-table tbody { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,370px),1fr)); gap:18px; }
+.portal-app .department-table tbody tr {
+ position:relative; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:auto auto auto 1fr; gap:12px; padding:22px; margin:0; overflow:hidden;
+ border:1px solid var(--line); border-radius:22px; background:#fff; box-shadow:inset 0 4px 0 var(--c-500),var(--sh-sm);
+ transition:transform .4s var(--ease),box-shadow .4s var(--ease),border-color .3s;
+}
+.portal-app .department-table tbody tr:hover { transform:translateY(-4px); background:#fff; box-shadow:inset 0 4px 0 var(--c-500),var(--sh-md); border-color:var(--line-strong); }
+.portal-app .department-table tbody tr:hover td:first-child, .portal-app .department-table tbody tr:focus-within td:first-child { box-shadow:none; }
+.portal-app .department-table tbody tr.department-archived { background:repeating-linear-gradient(135deg,#F6F7F8 0 12px,#F0F2F4 12px 24px); border-style:dashed; border-color:var(--g-400); box-shadow:inset 0 4px 0 var(--g-400),var(--sh-xs); }
+.portal-app .department-table tbody tr.department-archived:hover { background:repeating-linear-gradient(135deg,#F6F7F8 0 12px,#F0F2F4 12px 24px); }
+.portal-app .department-table tbody tr.department-archived::after { content:""; position:absolute; top:-26px; right:-26px; width:90px; height:90px; border-radius:50%; background:radial-gradient(circle,rgba(154,162,168,.35),transparent 65%); pointer-events:none; }
+.portal-app .department-table tbody td { display:block; padding:0; border:0; font-size:14px; min-width:0; }
+.portal-app .department-table tbody td[data-label="Название"], .portal-app .department-table tbody td[data-label="Статус"], .portal-app .department-table tbody td[data-label="Действия"] { grid-column:1 / -1; }
+.portal-app .department-table tbody td::before { display:none; }
+.portal-app .department-table tbody td[data-label="Пользователи"], .portal-app .department-table tbody td[data-label="Задачи"] {
+ display:grid; gap:2px; padding:12px 16px; border-radius:16px; background:var(--canvas); border:1px solid var(--line); font-size:28px; font-weight:800; letter-spacing:-.04em; line-height:1.1; color:var(--adm-ink); font-variant-numeric:tabular-nums;
+}
+.portal-app .department-table tbody td[data-label="Пользователи"]::before, .portal-app .department-table tbody td[data-label="Задачи"]::before { content:attr(data-label); display:block; margin:0; order:-1; font-size:12px; font-weight:650; letter-spacing:0; color:var(--adm-mute); }
+.portal-app .department-table tbody .department-archived td[data-label="Пользователи"], .portal-app .department-table tbody .department-archived td[data-label="Задачи"] { background:rgba(255,255,255,.7); }
+.portal-app .department-table .department-identity { gap:14px; align-items:center; }
+.portal-app .department-table .department-identity strong { font-size:18px; font-weight:800; letter-spacing:-.025em; line-height:1.3; color:var(--adm-ink); }
+.portal-app .department-table .department-identity small { margin-top:3px; font-size:12.5px; line-height:1.5; color:var(--adm-mute); }
+.portal-app .department-symbol { display:grid; width:52px; height:52px; border-radius:16px; border:1px solid #EE6A4E40; background:linear-gradient(135deg,var(--c-50),var(--c-100)); color:var(--c-700); box-shadow:var(--sh-xs); transition:transform .5s var(--spring); }
+.portal-app .department-table tbody tr:hover .department-symbol { transform:rotate(-7deg) scale(1.08); }
+.portal-app .department-archived .department-symbol { background:#E6E8EB; border-color:#C4C9CD; color:#4D555B; }
+.portal-app .department-table tbody td[data-label="Статус"] .badge { padding:5px 13px; }
+.portal-app .department-table tbody td[data-label="Действия"] { align-self:end; padding-top:16px; border-top:1px solid var(--line); }
+.portal-app .department-table tbody .department-archived td[data-label="Действия"] { border-top-style:dashed; }
+.portal-app .department-actions { gap:8px; flex-wrap:wrap; }
+.portal-app .department-actions .button { min-height:44px; padding:10px 16px; font-size:13px; }
+.portal-app .department-actions > .department-linked { flex-basis:100%; margin:2px 0 0; padding:0; background:none; color:var(--adm-mute); font-weight:500; font-size:12.5px; }
+.portal-app .department-delete { flex-basis:100%; border:1px dashed #E5A4AD; border-radius:14px; background:#FFF8F9; }
+.portal-app .department-delete > summary { display:flex; align-items:center; gap:8px; color:var(--adm-red-ink); font-weight:700; font-size:13px; border-radius:14px; }
+.portal-app .department-delete > summary:hover { background:var(--red-bg); }
+.portal-app .department-delete > p { color:var(--adm-ink2); }
+.portal-app .department-delete[data-ui-enhanced] { border:0; background:transparent; flex-basis:auto; }
+.portal-app .department-delete[data-ui-enhanced] > summary, .portal-app .department-delete[data-ui-enhanced] > p { display:none; }
+.portal-app .department-guidance { gap:18px; margin:26px 0; }
+.portal-app .department-guidance > div { position:relative; overflow:hidden; padding:24px 26px 24px 84px; border-radius:20px; border:1px solid var(--line); background:#fff; box-shadow:var(--sh-sm); }
+.portal-app .department-guidance > div .icon { position:absolute; left:24px; top:24px; box-sizing:content-box; width:20px; height:20px; padding:12px; border-radius:15px; background:var(--c-50); border:1px solid #EE6A4E40; color:var(--c-700); }
+.portal-app .department-guidance > div:nth-child(2) .icon { background:#EEF0F2; border-color:#C4C9CD; color:#3C434A; }
+.portal-app .department-guidance h2 { margin:2px 0 6px; font-size:17px; letter-spacing:-.015em; }
+.portal-app .department-guidance p { color:var(--adm-ink2); line-height:1.7; }
+
+/* ══ 6. Формы: секции, крупные поля, ошибки ════════════════════════════ */
+.portal-app .account-layout { grid-template-columns:minmax(0,1fr) 330px; gap:28px; }
+.portal-app .account-form-card { position:relative; overflow:hidden; padding:34px 38px 32px; border-radius:24px; }
+.portal-app .account-form-card::before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:linear-gradient(90deg,var(--c-500),#FFB36B 55%,transparent); }
+.portal-app .account-form-card > h2 { display:flex; align-items:center; gap:12px; margin:0 0 4px; font-size:23px; letter-spacing:-.025em; }
+.portal-app .account-fields { gap:30px 24px; margin:26px 0 30px; }
+.portal-app .account-fields:not(.department-fields) > .field { position:relative; }
+.portal-app .account-fields:not(.department-fields) > .field:first-child { margin-top:34px; }
+.portal-app .account-fields:not(.department-fields) > .field:first-child::before,
+.portal-app .account-fields > .field:has(select[name=role])::before,
+.portal-app .account-fields > .field.account-fixed-role::before,
+.portal-app .account-fields > .field:has(input[name=password])::before {
+ position:absolute; left:0; top:-32px; width:calc(200% + 24px); padding-bottom:7px; border-bottom:1px solid var(--line);
+ color:var(--adm-coral-ink); font-size:11.5px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; pointer-events:none;
+}
+.portal-app .account-fields:not(.department-fields) > .field:first-child::before { content:"Профиль"; content:"Профиль" / ""; }
+.portal-app .account-fields:not(.department-fields) > .field:first-child::before, .portal-app .account-fields > .field:has(input[name=password])::before, .portal-app .account-fields > .field.account-fixed-role::before { width:100%; }
+.portal-app .account-fields > .field:has(select[name=role])::before, .portal-app .account-fields > .field.account-fixed-role::before { content:"Доступ и отдел"; content:"Доступ и отдел" / ""; }
+.portal-app .account-fields > .field:has(input[name=password])::before { content:"Безопасность"; content:"Безопасность" / ""; }
+.portal-app .account-fields > .field:has(select[name=role]), .portal-app .account-fields > .field.account-fixed-role,
+.portal-app .account-fields > .field:has(select[name=department_id]) { margin-top:34px; }
+.portal-app .account-fields > .field:has(input[name=password]) { margin-top:34px; }
+.portal-app .account-fields > .field:has(select[name=department_id]) { grid-column:auto; }
+.portal-app .account-fields label, .portal-app .account-fixed-role > span { font-size:14px; font-weight:750; color:var(--adm-ink); }
+.portal-app .required { color:var(--c-600); font-weight:800; }
+.portal-app .account-fields input:not([type=hidden]), .portal-app .account-fields select { height:54px; padding:0 16px; font-size:16px; font-weight:500; color:var(--adm-ink); border:1.5px solid var(--line-strong); border-radius:14px; background-color:#FBFBFC; transition:border-color .2s,box-shadow .25s var(--ease),background-color .2s; }
+.portal-app .account-fields select { appearance:none; -webkit-appearance:none; padding-right:48px; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234D555B' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 16px center; background-size:18px; }
+.portal-app .account-fields input:not([type=hidden]):hover, .portal-app .account-fields select:hover { border-color:var(--g-400); background-color:#fff; }
+.portal-app .account-fields input:not([type=hidden]):focus-visible, .portal-app .account-fields select:focus-visible, .portal-app .audit-filters :is(input,select):focus-visible { border-color:var(--c-600); background-color:#fff; outline:2px solid var(--c-600); outline-offset:2px; box-shadow:0 0 0 6px rgba(238,106,78,.16); }
+.portal-app .field .hint { display:flex; align-items:flex-start; gap:7px; margin:0; font-size:12.5px; color:var(--adm-mute); line-height:1.55; }
+.portal-app .field > .hint::before { content:""; flex:none; width:15px; height:15px; margin-top:2px; background:var(--g-500); -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v6m0-10h.01'/%3E%3C/svg%3E") center / contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v6m0-10h.01'/%3E%3C/svg%3E") center / contain no-repeat; }
+.portal-app .field input[aria-invalid=true], .portal-app .field select[aria-invalid=true] { border-color:var(--red); background-color:#FFF8F9; box-shadow:0 0 0 4px rgba(216,55,75,.12); }
+.portal-app .field .field-error:not([hidden]) { display:flex; align-items:flex-start; gap:7px; padding:8px 12px; border-radius:10px; background:var(--red-bg); color:#8E1226; font-size:13px; font-weight:650; line-height:1.5; }
+.portal-app .field .field-error:not([hidden])::before { content:"!"; flex:none; display:grid; place-items:center; width:18px; height:18px; margin-top:1px; border-radius:50%; background:#B3243A; color:#fff; font-size:12px; font-weight:800; line-height:1; }
+.portal-app .error-summary { padding:18px 22px; border:1px solid #F0BCC4; border-left:5px solid var(--red); border-radius:16px; background:linear-gradient(90deg,#FFF1F3,#fff 70%); color:#7A1020; box-shadow:var(--sh-xs); }
+.portal-app .error-summary h2, .portal-app .error-summary h3 { margin:0 0 6px; font-size:16px; color:#8E1226; }
+.portal-app .error-summary p { margin:4px 0 0; font-size:14px; line-height:1.6; }
+.portal-app .error-summary a { color:#8E1226; font-weight:700; }
+.portal-app .departments-workspace > .error-summary, .portal-app .people-workspace > .error-summary { margin:0 0 22px; }
+.portal-app .account-fixed-role { grid-column:1 / -1; padding:16px 18px; border-radius:14px; background:var(--canvas); border:1px solid var(--line); }
+.portal-app .account-fixed-role strong { padding:4px 0 0; font-size:17px; }
+.portal-app .account-form-actions { gap:12px; margin-top:8px; padding-top:24px; }
+.portal-app .account-form-actions .button { min-height:52px; padding-inline:26px; font-size:15px; border-radius:14px; }
+.portal-app .account-explanation { position:relative; overflow:hidden; padding:30px 28px; border-radius:24px; border:1px solid var(--line); background:
+ radial-gradient(circle at center,rgba(60,67,74,.09) 1px,transparent 1.5px) 0 0 / 18px 18px,
+ linear-gradient(165deg,#fff 0%,#FFF3EF 100%); }
+.portal-app .account-explanation > * { position:relative; z-index:1; }
+.portal-app .account-explanation::after { content:""; position:absolute; right:-60px; bottom:-60px; width:190px; height:190px; border-radius:50%; border:1.5px solid rgba(238,106,78,.28); box-shadow:0 0 0 24px rgba(238,106,78,.06); pointer-events:none; }
+.portal-app .account-explanation .eyebrow { display:inline-flex; width:fit-content; padding:5px 13px; margin-bottom:14px; border-radius:99px; background:var(--c-50); border:1px solid #EE6A4E55; color:var(--adm-coral-ink); font-size:11px; font-weight:800; letter-spacing:.13em; }
+.portal-app .account-explanation h2 { margin-bottom:14px; font-size:21px; letter-spacing:-.025em; }
+.portal-app .account-explanation p, .portal-app .account-explanation dl { color:var(--adm-ink2); line-height:1.75; }
+.portal-app .account-explanation dt { margin-top:14px; color:var(--adm-mute); font-weight:700; letter-spacing:.04em; text-transform:uppercase; font-size:11.5px; }
+.portal-app .account-explanation dd { padding:9px 14px; margin-top:6px; border-radius:12px; background:rgba(255,255,255,.85); border:1px solid var(--line); }
+@media(min-width:1024px) { .portal-app .account-explanation { position:sticky; top:calc(var(--adm-sticky) + 20px); } }
+
+.portal-app .account-confirm-dialog { padding:32px 32px 28px; border:0; border-radius:26px; box-shadow:var(--sh-lg),0 0 0 1px rgba(27,30,33,.06); overflow:hidden; }
+.portal-app .account-confirm-dialog[open] { animation:adm-pop .35s var(--spring) both; }
+.portal-app .account-confirm-dialog::before { content:""; position:absolute; left:0; right:0; top:0; height:6px; background:linear-gradient(90deg,var(--c-600),#FFB36B); }
+.portal-app .account-confirm-dialog::backdrop { background:rgba(27,30,33,.6); backdrop-filter:blur(5px); }
+.portal-app .account-confirm-dialog .eyebrow { display:inline-flex; width:fit-content; padding:5px 13px; margin-bottom:10px; border-radius:99px; background:var(--c-50); border:1px solid #EE6A4E55; color:var(--adm-coral-ink); font-size:11px; font-weight:800; letter-spacing:.13em; }
+.portal-app .account-confirm-dialog h2 { margin:6px 0 12px; font-size:25px; letter-spacing:-.03em; }
+.portal-app .account-confirm-dialog p { color:var(--adm-ink2); }
+.portal-app .account-confirm-actions .button, .portal-app .account-confirm-actions button { min-height:48px; padding-inline:22px; border-radius:13px; }
+
+/* ══ 7. Журнал действий: таймлайн ══════════════════════════════════════ */
+.portal-app .audit-workspace .audit-hero { background-position:0 0,0 0,0 0,0 0,0 0; }
+.portal-app .audit-context { padding:14px 18px; margin:0 0 18px; border-radius:16px; background:#fff; border:1px solid var(--line); border-left:4px solid var(--g-500); color:var(--adm-ink2); font-size:13.5px; line-height:1.65; }
+.portal-app .audit-context > .icon { color:var(--g-600); }
+.portal-app .report-demo-note { display:inline-flex; padding:6px 14px; border-radius:99px; background:var(--c-50); border:1px solid #EE6A4E55; color:var(--adm-coral-ink); font-size:12.5px; font-weight:700; }
+
+.portal-app .audit-workspace .audit-filter-panel { margin:0 0 26px; overflow:hidden; border:1px solid var(--line); border-radius:20px; background:#fff; box-shadow:var(--sh-sm); }
+.portal-app .audit-filter-panel > .audit-filter-heading { min-height:76px; padding:16px 24px; border-radius:20px; transition:background-color .2s; }
+.portal-app .audit-filter-panel > .audit-filter-heading:hover { background:var(--canvas); }
+.portal-app .audit-filter-panel[open] > .audit-filter-heading { background:linear-gradient(180deg,#fff,#F7F8F9); border-radius:20px 20px 0 0; }
+.portal-app .audit-filter-symbol { width:44px; height:44px; border-radius:14px; background:var(--c-50); border:1px solid #EE6A4E40; color:var(--c-700); }
+.portal-app .audit-filter-copy strong { display:block; font-size:16px; letter-spacing:-.015em; }
+.portal-app .audit-filter-copy small { color:var(--adm-mute); font-size:13px; }
+.portal-app .audit-filter-panel > .audit-filter-heading::after { border-color:var(--c-700); width:9px; height:9px; }
+.portal-app .audit-filter-panel > .audit-filters { padding:22px 24px 24px; margin:0; }
+.portal-app .audit-filters select, .portal-app .audit-filters input[type=date] { height:50px; min-height:50px; padding:0 14px; border:1.5px solid var(--line-strong); border-radius:13px; background-color:#FBFBFC; font-size:15px; }
+.portal-app .audit-filters select { appearance:none; -webkit-appearance:none; padding-right:44px; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234D555B' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 14px center; background-size:18px; }
+.portal-app .audit-filters label { font-size:13.5px; font-weight:750; }
+.portal-app .audit-filter-actions { align-self:end; padding-top:0; }
+.portal-app .audit-filter-actions .button { min-height:50px; border-radius:13px; }
+.portal-app .audit-filter-note { padding:10px 14px; border-radius:12px; background:var(--canvas); color:var(--adm-ink2); }
+
+.portal-app .audit-summary { margin:6px 0 20px; }
+.portal-app .audit-summary h2 { font-size:24px; letter-spacing:-.03em; }
+.portal-app .audit-total { padding:3px 13px; border-radius:99px; background:linear-gradient(135deg,#E2573B,#C8432B); color:#fff; font-size:15px; }
+.portal-app .audit-summary p { padding:6px 14px; border-radius:99px; background:#fff; border:1px solid var(--line); color:var(--adm-ink2); font-size:13px; font-weight:600; }
+
+.portal-app .audit-timeline { position:relative; gap:20px; }
+.portal-app .audit-timeline .audit-entry.card { background:transparent; border:0; border-radius:0; box-shadow:none; transform:none; }
+.portal-app .audit-timeline .audit-entry { --tone:#B5361F; --tone-bg:var(--c-50); --tone-line:#EE6A4E55; grid-template-columns:48px minmax(0,1fr); gap:18px; }
+.portal-app .audit-timeline .audit-entry[data-event-source=admin] { --tone:#3A4045; --tone-bg:#EEF0F2; --tone-line:#C4C9CD; }
+.portal-app .audit-timeline .audit-entry[data-audit-tone=danger] { --tone:#B3243A; --tone-bg:var(--red-bg); --tone-line:#D8374B55; }
+.portal-app .audit-timeline .audit-entry[data-audit-tone=warn] { --tone:#8A5200; --tone-bg:var(--amber-bg); --tone-line:#D9891A66; }
+.portal-app .audit-timeline .audit-entry[data-audit-tone=ok] { --tone:#0F6B47; --tone-bg:var(--green-bg); --tone-line:#1F9D6B55; }
+.portal-app .audit-entry::before { left:23px; top:52px; bottom:-20px; width:2px; background:repeating-linear-gradient(180deg,var(--line-strong) 0 6px,transparent 6px 11px); }
+.portal-app .audit-feed-icon { width:48px; height:48px; border-radius:50%; border:2px solid var(--tone-line); background:var(--tone-bg); color:var(--tone); box-shadow:0 0 0 6px var(--canvas); z-index:1; transition:transform .45s var(--spring); }
+.portal-app .audit-entry:hover .audit-feed-icon { transform:scale(1.1) rotate(-6deg); }
+.portal-app .audit-feed-icon > .icon { width:21px; height:21px; }
+.portal-app .audit-entry-body { padding:22px 26px 12px; border:1px solid var(--line); border-left:5px solid var(--tone); border-radius:20px; background:#fff; box-shadow:var(--sh-sm); transition:transform .4s var(--ease),box-shadow .4s var(--ease); }
+.portal-app .audit-entry:hover .audit-entry-body { transform:translateY(-2px); box-shadow:var(--sh-md); }
+.portal-app .audit-entry[data-event-source=admin] .audit-entry-body { background:#fff; border-color:var(--line); border-left-color:var(--tone); }
+.portal-app .audit-entry-meta { margin-bottom:10px; font-size:13px; }
+.portal-app .audit-source, .portal-app .audit-entry[data-event-source=admin] .audit-source { padding:5px 12px; border-radius:99px; border:1px solid var(--tone-line); background:var(--tone-bg); color:var(--tone); font-size:12.5px; font-weight:750; }
+.portal-app .audit-entry-meta time { padding:4px 11px; border-radius:99px; background:var(--canvas); color:var(--adm-ink2); font-variant-numeric:tabular-nums; font-weight:600; font-size:12.5px; }
+.portal-app .audit-action { margin-bottom:16px; font-size:21px; font-weight:800; letter-spacing:-.03em; line-height:1.3; color:var(--adm-ink); }
+.portal-app .audit-participants { gap:14px 28px; padding:14px 16px; border-radius:14px; background:#F7F8F9; border:1px solid var(--line); }
+.portal-app .audit-meta-label { font-size:11.5px; font-weight:750; letter-spacing:.07em; text-transform:uppercase; color:var(--adm-mute); }
+.portal-app .audit-actor > strong, .portal-app .audit-object > strong { font-size:15px; color:var(--adm-ink); }
+.portal-app .audit-actor p { color:var(--adm-ink2); }
+.portal-app .audit-object a { min-height:44px; color:var(--adm-coral-ink); font-size:14px; font-weight:750; text-decoration:none; }
+.portal-app .audit-object a:hover { text-decoration:underline; }
+.portal-app .audit-comment { position:relative; padding:14px 18px 14px 46px; border-left:0; border-radius:14px; background:#fff; border:1px dashed var(--g-300); }
+.portal-app .audit-comment::before { content:"“"; content:"“" / ""; position:absolute; left:14px; top:2px; font-size:42px; font-weight:800; line-height:1.2; color:var(--tone); }
+.portal-app .audit-comment h4 { font-size:11.5px; font-weight:750; letter-spacing:.07em; text-transform:uppercase; color:var(--adm-mute); }
+.portal-app .audit-comment p { color:var(--adm-ink); }
+.portal-app .audit-changes { margin-top:14px; border-top:1px solid var(--line); }
+.portal-app .audit-changes > summary { display:flex; align-items:center; gap:10px; min-height:52px; padding:12px 4px; color:var(--adm-ink); font-size:14px; font-weight:750; cursor:pointer; }
+.portal-app .audit-changes > summary:hover { color:var(--adm-coral-ink); }
+.portal-app .audit-change-count { margin-left:0; padding:2px 10px; border-radius:99px; background:var(--tone-bg); border:1px solid var(--tone-line); color:var(--tone); font-size:12.5px; }
+.portal-app .audit-changes[open] { margin-bottom:8px; }
+.portal-app .audit-change { grid-template-columns:minmax(110px,.55fr) repeat(2,minmax(0,1fr)); gap:12px 34px; padding:12px 0; border-top:1px dashed var(--line-strong); align-items:start; }
+.portal-app .audit-change dt { padding-top:10px; color:var(--adm-ink2); font-weight:750; font-size:13px; }
+.portal-app .audit-change .audit-before, .portal-app .audit-change .audit-after { position:relative; padding:9px 13px; border-radius:11px; font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; }
+.portal-app .audit-change .audit-before { background:#FFF1F3; border:1px solid #F0BCC4; border-left:4px solid #D8374B; }
+.portal-app .audit-change .audit-after { background:#EAF8F1; border:1px solid #A9DDC4; border-left:4px solid #1F9D6B; }
+.portal-app .audit-change .audit-after::before { content:"→"; content:"→" / ""; position:absolute; left:-27px; top:50%; margin-top:-12px; font:700 18px/24px var(--font); color:var(--g-500); }
+.portal-app .audit-change dd > span { font-family:var(--font); font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+.portal-app .audit-change .audit-before > span { color:#8E1226; }
+.portal-app .audit-change .audit-after > span { color:#0A5A3B; }
+.portal-app .audit-change .audit-before p { color:#6E1020; }
+.portal-app .audit-change .audit-after p { color:#0B4F34; }
+.portal-app .audit-change dd p { margin:3px 0 0; font-size:13px; line-height:1.55; }
+.portal-app .audit-pagination, .portal-app .pagination { gap:12px; padding:10px 12px; margin:28px auto 8px; width:fit-content; max-width:100%; border-radius:99px; background:#fff; border:1px solid var(--line); box-shadow:var(--sh-sm); }
+.portal-app .pagination > span { padding:0 10px; color:var(--adm-ink2); font-weight:650; font-variant-numeric:tabular-nums; }
+.portal-app .pagination .button { min-height:44px; border-radius:99px; padding-inline:20px; }
+.portal-app .audit-empty { padding:6px; }
+
+/* ══ 8. Отчёты ═════════════════════════════════════════════════════════ */
+.portal-app .report-snapshot { margin-bottom:22px; }
+.portal-app .report-snapshot p { padding:7px 14px; border-radius:99px; background:#fff; border:1px solid var(--line); color:var(--adm-ink2); font-size:12.5px; font-weight:600; box-shadow:var(--sh-xs); }
+.portal-app .report-snapshot .icon { color:var(--c-600); }
+.portal-app .report-demo-label { padding:7px 14px; border-radius:99px; border:1px solid #EE6A4E55; background:var(--c-50); color:var(--adm-coral-ink); font-weight:700; }
+
+/* «Работа сейчас» — графитовая плитка-акцент */
+.portal-app .report-spotlight { position:relative; overflow:hidden; isolation:isolate; gap:28px; padding:28px 32px; border:0; border-radius:26px; color:#fff; box-shadow:var(--sh-md);
+ background:
+  radial-gradient(circle at center,rgba(255,255,255,.08) 1.1px,transparent 1.7px) 0 0 / 22px 22px,
+  radial-gradient(60% 160% at 0% 120%,rgba(238,106,78,.38),transparent 60%),
+  linear-gradient(115deg,#1F2326 0%,#2C3136 60%,#3D4247 100%); }
+.portal-app .report-spotlight::before { content:""; position:absolute; z-index:-1; right:-80px; top:-120px; width:300px; height:300px; border-radius:50%; border:1.5px solid rgba(255,255,255,.12); box-shadow:0 0 0 38px rgba(255,255,255,.03),0 0 0 76px rgba(255,255,255,.02); }
+.portal-app .report-spotlight .report-spotlight-label, .portal-app .report-spotlight h2.report-spotlight-label { display:inline-flex; width:fit-content; padding:4px 13px; margin-bottom:12px; border-radius:99px; border:1px solid #EE6A4E66; background:#EE6A4E22; color:#FFB9A6; font-size:11.5px; font-weight:750; letter-spacing:.12em; text-transform:uppercase; }
+.portal-app .report-spotlight-value strong { font-size:64px; font-weight:800; letter-spacing:-.06em; line-height:.95; color:#FFA68F; }
+.portal-app .report-spotlight-value span { font-size:17px; color:#fff; }
+.portal-app .report-spotlight-note { color:#D3D7DB; font-size:14px; }
+.portal-app .report-spotlight-overdue { padding:18px 20px; border:1px solid rgba(255,138,150,.45); border-radius:18px; background:linear-gradient(135deg,rgba(216,55,75,.24),rgba(216,55,75,.1)); }
+.portal-app .report-spotlight-overdue > div > strong { color:#FFC2CA; font-size:48px; }
+.portal-app .report-spotlight-overdue span, .portal-app .report-spotlight-overdue p, .portal-app .report-spotlight-overdue small { color:#F1E4E6; }
+.portal-app .report-spotlight-overdue > div > span { font-size:14px; font-weight:700; color:#fff; }
+
+/* KPI-плитки: цветной акцент и крупные цифры */
+.portal-app .reports-workspace .report-kpis { gap:16px; }
+.portal-app .reports-workspace .report-kpi { --kpi:var(--c-500); box-shadow:inset 0 -3px 0 var(--kpi),var(--sh-sm); transition:transform .4s var(--ease),box-shadow .4s var(--ease); }
+.portal-app .reports-workspace .report-kpi:nth-child(4n+2) { --kpi:var(--green); }
+.portal-app .reports-workspace .report-kpi:nth-child(4n+3) { --kpi:var(--blue); }
+.portal-app .reports-workspace .report-kpi:nth-child(4n) { --kpi:var(--amber); }
+.portal-app .reports-workspace .report-kpi:hover { transform:translateY(-4px); box-shadow:inset 0 -3px 0 var(--kpi),var(--sh-md); }
+.portal-app .reports-workspace .report-kpi > strong { font-size:44px; font-weight:800; letter-spacing:-.055em; color:var(--adm-ink); font-variant-numeric:tabular-nums; }
+.portal-app .reports-workspace .report-kpi > span { color:var(--adm-ink2); font-weight:700; }
+.portal-app .reports-workspace .report-kpi > small { color:var(--adm-mute); font-size:12.5px; line-height:1.55; }
+
+/* Заголовки секций с иконками */
+.portal-app .reports-workspace .report-section-heading h2 { display:flex; align-items:center; gap:13px; font-size:21px; letter-spacing:-.025em; }
+.portal-app .reports-workspace .report-section-heading h2::before {
+ content:""; flex:none; width:40px; height:40px; border-radius:13px; border:1px solid #EE6A4E40;
+ background:var(--rs-icon,url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BF3B25' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20V10M12 20V4M20 20v-7'/%3E%3C/svg%3E")) center / 21px no-repeat,var(--c-50);
+}
+
+
+
+
+.portal-app .reports-workspace .report-section-heading h2[id$="punctuality"], .portal-app .reports-workspace .report-section-heading h2[id$="duration"] { --rs-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BF3B25' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v5l3 2'/%3E%3C/svg%3E"); }
+
+.portal-app .reports-workspace .report-section-heading h2[id$="partners"], .portal-app .reports-workspace .report-section-heading h2#department-statistics { --rs-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BF3B25' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='2'/%3E%3Cpath d='M9 21v-4h6v4M8 7h1M15 7h1M8 12h1M15 12h1'/%3E%3C/svg%3E"); }
+.portal-app .reports-workspace .report-section-heading h2[id$="ranking"] { --rs-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BF3B25' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3c1 4-3 5-3 9 0 2 1 3 3 3 3 0 4-3 3-5 4 3 5 6 3 9-1 2-3 3-6 3-5 0-8-3-8-7 0-5 5-6 8-12Z'/%3E%3C/svg%3E"); }
+.portal-app .reports-workspace .report-section-heading p { margin-bottom:16px; color:var(--adm-mute); line-height:1.7; }
+.portal-app .reports-workspace .report-section { border-radius:22px; }
+.portal-app .reports-workspace .report-section:hover { box-shadow:var(--sh-md); }
+.portal-app .reports-workspace > .report-section:not(.report-department-section) { margin:0 0 24px; }
+.portal-app .reports-workspace .report-overview-grid > .report-section { animation:adm-rise .6s var(--ease) both; }
+.portal-app .reports-workspace .report-overview-grid > .report-section:nth-child(2) { animation-delay:.1s; }
+
+/* Сравнение отделов */
+.portal-app .department-comparison { position:relative; overflow:hidden; padding:28px 30px; border-color:var(--line); border-radius:24px; background:linear-gradient(180deg,#fff,#fff); box-shadow:inset 0 5px 0 var(--c-500),var(--sh-sm); }
+.portal-app .department-comparison .report-section-heading > .eyebrow { display:inline-flex; width:fit-content; padding:4px 12px; margin-bottom:10px; border-radius:99px; background:var(--c-50); border:1px solid #EE6A4E55; color:var(--adm-coral-ink); font-size:11px; font-weight:800; letter-spacing:.13em; }
+.portal-app .department-comparison .report-section-heading h2 { font-size:26px; letter-spacing:-.035em; }
+.portal-app .department-comparison-legend { gap:8px 10px; padding:12px; border-radius:14px; border-color:var(--line); background:var(--canvas); }
+.portal-app .department-comparison-legend li { padding:4px 12px 4px 10px; border-radius:99px; background:#fff; border:1px solid var(--line); color:var(--adm-ink2); font-size:12.5px; font-weight:650; }
+.portal-app .department-comparison-row { margin-inline:-14px; padding:22px 14px; border-radius:16px; border-bottom:1px dashed var(--line-strong); transition:background-color .25s; }
+.portal-app .department-comparison-row:hover { background:linear-gradient(90deg,var(--c-50),#fff 60%); }
+.portal-app .department-comparison-row:last-child { border-bottom:0; padding-bottom:22px; }
+.portal-app .department-comparison-name a { color:var(--adm-ink); font-size:17px; font-weight:800; letter-spacing:-.025em; }
+.portal-app .department-comparison-name a:hover { color:var(--adm-coral-ink); }
+.portal-app .department-comparison-name .icon { color:var(--c-600); transition:transform .3s var(--spring); }
+.portal-app .department-comparison-name a:hover .icon { transform:translateX(4px); }
+.portal-app .department-comparison-metrics > div { padding:8px 14px; border-left:0; border-radius:12px; background:var(--canvas); border:1px solid var(--line); box-shadow:inset 3px 0 0 var(--g-400); }
+.portal-app .department-comparison-metrics > div:first-child { box-shadow:inset 3px 0 0 var(--c-500); }
+.portal-app .department-comparison-metrics > div:nth-child(2) { box-shadow:inset 3px 0 0 var(--green); }
+.portal-app .department-comparison-metrics > div:nth-child(3) { box-shadow:inset 3px 0 0 var(--red); }
+.portal-app .department-comparison-metrics dt { font-size:12px; font-weight:650; color:var(--adm-mute); }
+.portal-app .department-comparison-metrics dd { font-size:28px; font-weight:800; color:var(--adm-ink); font-variant-numeric:tabular-nums; }
+.portal-app .department-comparison-metrics > div:nth-child(2) dd { color:#0F6B47; }
+.portal-app .department-comparison-metrics > div:nth-child(3) dd { color:#A91F35; }
+.portal-app .department-comparison-track { height:18px; border-radius:99px; background:repeating-linear-gradient(135deg,#EEF0F2 0 6px,#E6E9EC 6px 12px); box-shadow:inset 0 1px 2px rgba(27,30,33,.1); }
+.portal-app .department-comparison-fill { box-shadow:inset -2px 0 0 #fff; transition:filter .25s; }
+/* общий класс status-* (бейджи) красил сегменты бледным фоном: возвращаем насыщенные цвета статусов */
+.portal-app .department-comparison-fill.status-new { background:var(--c-500); }
+.portal-app .department-comparison-fill.status-in_progress { background:var(--blue); }
+.portal-app .department-comparison-fill.status-completed { background:var(--green); }
+.portal-app .department-comparison-fill.status-cancelled { background:var(--g-400); }
+.portal-app .department-comparison-fill.status-rejected { background:var(--red); }
+.portal-app .department-comparison-row:hover .department-comparison-fill { filter:saturate(1.15) brightness(1.04); }
+.portal-app .department-comparison-total strong { font-size:14px; color:var(--adm-ink); }
+.portal-app .department-comparison-statuses { gap:6px 8px; }
+.portal-app .department-comparison-statuses span { padding:3px 10px; border-radius:99px; background:var(--canvas); border:1px solid var(--line); color:var(--adm-ink2); font-size:12px; }
+.portal-app .department-comparison-statuses strong { color:var(--adm-ink); }
+
+/* Карточки отделов в отчёте */
+.portal-app .reports-workspace .report-department { border-radius:22px; border-top:0; box-shadow:inset 0 4px 0 var(--c-500),var(--sh-sm); transition:transform .4s var(--ease),box-shadow .4s var(--ease); }
+.portal-app .reports-workspace .report-department:hover { transform:translateY(-3px); box-shadow:inset 0 4px 0 var(--c-500),var(--sh-md); }
+.portal-app .report-department-heading h3 { display:flex; align-items:center; gap:12px; font-size:19px; font-weight:800; letter-spacing:-.025em; }
+.portal-app .report-department-heading h3::before { content:""; flex:none; width:36px; height:36px; border-radius:12px; border:1px solid #EE6A4E40; background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BF3B25' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='2'/%3E%3Cpath d='M9 21v-4h6v4M8 7h1M15 7h1M8 12h1M15 12h1'/%3E%3C/svg%3E") center / 19px no-repeat,var(--c-50); }
+.portal-app .reports-workspace .report-archive { padding:5px 12px; border-radius:99px; border:1px dashed var(--g-400); background:#EEF0F2; color:#3C434A; font-weight:700; }
+.portal-app .report-direction-heading strong { font-variant-numeric:tabular-nums; }
+.portal-app .report-department-details summary, .portal-app .report-detail-figures > summary, .portal-app .report-method > summary { color:var(--adm-coral-ink); font-weight:750; }
+.portal-app .reports-workspace details.report-method, .portal-app .report-detail-figures { border-radius:16px; }
+.portal-app :is(.report-method,.report-detail-figures) > summary { background:var(--canvas); transition:background-color .2s; }
+.portal-app :is(.report-method,.report-detail-figures) > summary:hover { background:var(--c-50); }
+.portal-app :is(.report-method,.report-detail-figures)[open] > summary { background:var(--c-50); }
+.portal-app .report-counting-note { padding:16px 20px; border:1px solid var(--line); border-left:4px solid var(--g-500); border-radius:14px; background:#fff; color:var(--adm-ink2); }
+.portal-app .report-averages .report-average-group { padding:18px 20px; border-radius:16px; background:var(--canvas); box-shadow:inset 0 0 0 1px var(--line); }
+.portal-app .report-averages .report-average-group h3 { color:var(--adm-mute); font-size:12.5px; font-weight:750; letter-spacing:.06em; text-transform:uppercase; }
+.portal-app .report-averages .report-average-group .report-average { color:var(--c-700); font-weight:800; }
+.portal-app .report-averages .report-direction-averages .report-average { color:var(--adm-ink); }
+.portal-app .reports-workspace .report-table thead th { background:#F2F3F5; color:#4D555B; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; }
+.portal-app .reports-workspace .report-table tbody tr { transition:background-color .2s; }
+.portal-app .reports-workspace .report-table tbody tr:hover { background:var(--c-50); }
+.portal-app .report-table tfoot { background:var(--canvas); }
+
+/* ══ 9. Общие блоки: сообщения, пустые состояния ═══════════════════════ */
+.portal-app .message { align-items:flex-start; gap:12px; padding:16px 20px; border:1px solid var(--line); border-left:5px solid var(--g-500); border-radius:16px; background:#fff; color:var(--adm-ink); box-shadow:var(--sh-xs); }
+.portal-app .message > .icon { flex:none; margin-top:1px; color:var(--g-600); }
+.portal-app .message p { font-size:14px; line-height:1.6; color:var(--adm-ink2); }
+.portal-app .message-error { border-left-color:var(--red); background:linear-gradient(90deg,#FFF1F3,#fff 70%); }
+.portal-app .message-error > .icon, .portal-app .message-error p { color:#8E1226; }
+.portal-app .message-success { border-left-color:var(--green); background:linear-gradient(90deg,#EAF8F1,#fff 70%); }
+.portal-app .message-success > .icon { color:#0F6B47; }
+.portal-app .empty-state { position:relative; gap:10px; padding:44px 24px 46px; border:2px dashed var(--line-strong); border-radius:24px; color:var(--adm-ink2); background:
+ radial-gradient(circle at center,rgba(60,67,74,.08) 1px,transparent 1.5px) 0 0 / 20px 20px,linear-gradient(180deg,#fff,#FAFBFB); }
+.portal-app .empty-state > .icon { display:none; }
+.portal-app .empty-art { display:block; margin-bottom:6px; animation:adm-float 7s ease-in-out infinite alternate; }
+.portal-app .empty-art svg { display:block; max-width:100%; height:auto; }
+.portal-app .empty-state h2 { margin:0; font-size:24px; letter-spacing:-.03em; color:var(--adm-ink); }
+.portal-app .empty-state p { margin:0; color:var(--adm-ink2); font-size:15px; }
+.portal-app .reports-workspace > .empty-state { margin-bottom:24px; }
+
+/* ══ 10. Адаптив ═══════════════════════════════════════════════════════ */
+/* смещение липкой шапки таблицы = высота липкой верхней панели (измерено: 78px; 135px при 1280–1365; 115px при 1366–1439) */
+@media(min-width:1024px) { .portal-app .people-workspace { --adm-sticky:78px; } }
+@media(min-width:1280px) and (max-width:1365px) { .portal-app .people-workspace { --adm-sticky:135px; } }
+@media(min-width:1366px) and (max-width:1439px) { .portal-app .people-workspace { --adm-sticky:115px; } }
+@media(min-width:1440px) { .portal-app .people-workspace { --adm-sticky:78px; } }
+@media(max-width:1279px) {
+ .portal-app .people-table thead th, .portal-app .people-table tbody td { padding-inline:16px; }
+ .portal-app .account-layout { grid-template-columns:minmax(0,1fr) 280px; }
+ .portal-app .audit-change { gap:12px 30px; }
+}
+@media(max-width:1023px) {
+ .portal-app .account-layout { grid-template-columns:minmax(0,1fr); }
+ .portal-app .account-explanation { position:relative; top:auto; }
+ .portal-app .people-workspace .workspace-hero { padding:28px 30px; }
+ .portal-app .report-spotlight { grid-template-columns:minmax(0,1fr); }
+}
+/* таблица людей превращается в карточки уже на планшете (5 колонок не помещаются) */
+@media(max-width:1023px) {
+ .portal-app .people-table { min-width:0; }
+ .portal-app .people-table:not(.department-table), .portal-app .people-table:not(.department-table) tbody, .portal-app .people-table:not(.department-table) tr, .portal-app .people-table:not(.department-table) td { display:block; width:100%; }
+ .portal-app .people-table:not(.department-table) thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+ .portal-app .people-table:not(.department-table) td::before { content:attr(data-label); display:block; margin-bottom:6px; }
+ .portal-app .people-table:not(.department-table) td:first-child::before { display:none; }
+ .portal-app .people-directory { border:0; background:transparent; box-shadow:none; overflow:visible; }
+ .portal-app .people-directory-heading { padding:6px 2px 14px; background:transparent; border:0; }
+ .portal-app .person-avatar { display:grid; }
+ .portal-app .people-metrics > div { grid-template-columns:minmax(0,1fr); min-height:0; padding:16px 18px 18px; gap:8px; }
+ .portal-app .people-metrics > div::before, .portal-app .people-metrics > div::after { display:none; }
+ .portal-app .people-metrics dt, .portal-app .people-metrics dd { grid-column:1; grid-row:auto; }
+ .portal-app .people-metrics dd { order:-1; font-size:32px; }
+ .portal-app .people-table:not(.department-table) tbody tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 14px; padding:18px; margin:0 0 14px; border-radius:20px; box-shadow:inset 0 3px 0 var(--c-500),var(--sh-sm); }
+ .portal-app .people-table:not(.department-table) tbody tr:hover { background:#fff; }
+ .portal-app .people-table:not(.department-table) tbody tr td:first-child, .portal-app .people-table:not(.department-table) tbody tr:hover td:first-child { box-shadow:none; }
+ .portal-app .people-table:not(.department-table) tbody td { padding:6px 0; }
+ .portal-app .people-table:not(.department-table) td[data-label="Имя и логин"], .portal-app .people-table:not(.department-table) td[data-label="Действия"], .portal-app .people-table:not(.department-table) td[data-label="Отдел"] { grid-column:1 / -1; }
+ .portal-app .people-table:not(.department-table) td[data-label="Действия"] { margin-top:6px; padding-top:14px; border-top:1px dashed var(--line-strong); }
+ .portal-app .people-table:not(.department-table) td[data-label="Действия"]::before { display:none; }
+ .portal-app .people-table:not(.department-table) td::before { font-size:11px; font-weight:750; letter-spacing:.07em; text-transform:uppercase; color:var(--adm-mute); }
+  
+  
+ .portal-app .people-table:not(.department-table) td[data-label="Действия"] { order:5; }
+ .portal-app .person-avatar { width:48px; height:48px; }
+ .portal-app .person-actions { display:grid; grid-template-columns:repeat(auto-fit,minmax(104px,1fr)); }
+ .portal-app .person-actions .button { width:100%; justify-content:center; }
+ .portal-app .person-actions > form:has(.account-disable) { padding-left:0; margin-left:0; border-left:0; }
+ .portal-app .person-actions > .hint { grid-column:1 / -1; text-align:center; }
+}
+@media(max-width:767px) {
+ .portal-app .people-workspace .workspace-hero { min-height:0; padding:24px 22px 26px; border-radius:22px; background-position:right -10px bottom -10px,0 0,0 0,0 0,0 0; background-size:120px,auto,24px 24px,auto,auto; }
+ .portal-app .people-workspace .workspace-hero:not(:has(> .button,> .badge)) { background-position:right -10px bottom -10px,0 0,0 0,0 0,0 0; }
+ .portal-app .people-workspace .workspace-hero::after { left:22px; }
+ .portal-app .people-workspace .workspace-hero > .button { width:100%; justify-content:center; }
+ .portal-app .people-workspace .workspace-hero .activity-hero-symbol { display:none; }
+ .portal-app .people-metrics > div { grid-template-columns:minmax(0,1fr); min-height:0; gap:8px; }
+ .portal-app .people-metrics > div::before, .portal-app .people-metrics > div::after { display:none; }
+ .portal-app .people-metrics dt, .portal-app .people-metrics dd { grid-column:1; grid-row:auto; }
+ .portal-app .people-metrics dd { order:-1; font-size:30px; }
+ .portal-app .people-metrics dt { font-size:12px; line-height:1.3; overflow-wrap:anywhere; hyphens:auto; }
+ .portal-app .people-metrics > div { padding:12px 11px 14px; }
+ .portal-app .people-metrics { gap:8px; }
+ .portal-app .people-metrics > div { box-shadow:inset 0 -3px 0 var(--m),var(--sh-xs); }
+ .portal-app .people-filters { display:flex; width:100%; }
+ .portal-app .people-filters .button { flex:1 1 0; justify-content:center; padding-inline:12px; }
+ .portal-app .people-directory-heading { padding:6px 2px 14px; background:transparent; }
+ .portal-app .department-table tbody { grid-template-columns:minmax(0,1fr); gap:14px; }
+ .portal-app .department-table tbody tr { padding:18px; }
+ .portal-app .department-table tbody td::before { margin:0; }
+ .portal-app .department-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .portal-app .department-actions .button { width:100%; justify-content:center; }
+ .portal-app .department-actions form { display:block; }
+ .portal-app .department-guidance > div { padding:20px 20px 20px 76px; }
+ .portal-app .account-form-card { padding:26px 20px 24px; border-radius:22px; }
+ .portal-app .account-fields:not(.department-fields) > .field:first-child { margin-top:34px; }
+ .portal-app .account-fields > .field::before { width:100% !important; }
+ .portal-app .account-fields > .field:has(select[name=department_id]) { margin-top:0; }
+ .portal-app .account-fields input:not([type=hidden]), .portal-app .account-fields select { font-size:16px; }
+ .portal-app .account-explanation { padding:24px 22px; }
+ .portal-app .audit-timeline .audit-entry { grid-template-columns:34px minmax(0,1fr); gap:10px; }
+ .portal-app .audit-feed-icon { width:34px; height:34px; box-shadow:0 0 0 4px var(--canvas); }
+ .portal-app .audit-feed-icon > .icon { width:16px; height:16px; }
+ .portal-app .audit-entry::before { left:16px; top:38px; }
+ .portal-app .audit-entry-body { padding:18px 16px 8px; border-radius:16px; }
+ .portal-app .audit-action { font-size:18px; }
+ .portal-app .audit-change { grid-template-columns:minmax(0,1fr); gap:8px; }
+ .portal-app .audit-change dt { padding-top:0; }
+ .portal-app .audit-change .audit-after::before { content:"↓"; content:"↓" / ""; left:50%; top:-22px; margin:0 0 0 -8px; }
+ .portal-app .audit-change .audit-after { margin-top:14px; }
+ .portal-app .audit-filter-panel > .audit-filters { padding:18px 16px 20px; }
+ .portal-app .audit-summary p { align-self:stretch; border-radius:14px; }
+ .portal-app .report-spotlight { padding:22px 20px; }
+ .portal-app .report-spotlight-value strong { font-size:52px; }
+ .portal-app .reports-workspace .report-kpi { position:relative; min-height:0; padding:18px 20px 22px; box-shadow:inset 0 -3px 0 var(--kpi),var(--sh-sm); }
+ .portal-app .reports-workspace .report-kpi > strong { font-size:38px; }
+ .portal-app .reports-workspace .report-section-heading h2 { font-size:19px; }
+ .portal-app .reports-workspace .report-section-heading h2::before { width:36px; height:36px; }
+ .portal-app .department-comparison { padding:22px 18px; }
+ .portal-app .department-comparison-row { margin-inline:-6px; padding:20px 6px; }
+ .portal-app .department-comparison-metrics > div { padding:8px 10px; }
+ .portal-app .department-comparison-metrics dd { font-size:24px; }
+ .portal-app .pagination { border-radius:22px; }
+ .portal-app .empty-state { padding:34px 18px 36px; }
+}
+@media(max-width:560px) { .portal-app .reports-workspace .report-kpis { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:420px) {
+ .portal-app .person-actions, .portal-app .department-actions { grid-template-columns:minmax(0,1fr); }
+}
+
+/* ══ 11. Уменьшение движения: отключаем ВСЮ анимацию слоя ══════════════ */
+@media(prefers-reduced-motion:reduce) {
+ .portal-app .people-workspace > :not(dialog), .portal-app .people-table tbody tr, .portal-app .reports-workspace .report-overview-grid > .report-section,
+ .portal-app .people-workspace .workspace-hero::before, .portal-app .empty-art, .portal-app .account-confirm-dialog[open] { animation:none !important; }
+ .portal-app .people-workspace *, .portal-app .people-workspace *::before, .portal-app .people-workspace *::after { transition:none !important; }
+ .portal-app .people-table tr:hover .person-avatar, .portal-app .department-table tbody tr:hover, .portal-app .people-metrics > div:hover,
+ .portal-app .reports-workspace .report-kpi:hover, .portal-app .reports-workspace .report-department:hover, .portal-app .audit-entry:hover .audit-entry-body,
+ .portal-app .audit-entry:hover .audit-feed-icon, .portal-app .people-back:hover { transform:none !important; }
+}

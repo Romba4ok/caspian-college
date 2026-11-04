@@ -10,7 +10,7 @@
 {% if task.status in ['new','in_progress'] and deadline_state.overdue %}<span class="badge task-late">{{ icon('alert',14) }}Просрочена</span>{% endif %}</div>
 {%- endmacro %}
 {% macro notices() -%}
-{{ ui.task_process(task) }}
+{{ ui.task_process(task, true) }}
 {% if task.status in ['completed','cancelled','rejected'] %}<p class="reading-notice">{{ icon('lock',17) }}Задача закрыта. История и материалы доступны для просмотра и скачивания.{% if task.status == 'completed' and task_actions %} Замечания для разрешённого возврата добавляются на полной странице.{% endif %}</p>
 {% elif current_user.role == 'admin' %}<p class="reading-notice">{{ icon('info',17) }}Просмотр администратора.</p>{% endif %}
 {% if attention_label %}<p class="reading-notice">{{ attention_label }}</p>{% endif %}
@@ -35,7 +35,7 @@
 {%- endmacro %}
 {% macro file_links(files, compact=false) -%}
 <ul class="reading-files{% if compact %} reading-files-inline{% endif %}">{% for file in files %}
-<li><a href="{{ url_for('tasks.task_download', attachment_id=file.id) }}">{{ ui.task_symbol('attachment',19) }}<span class="file-name">{{ file.original_filename }}<small>{{ (file.size_bytes / 1024)|round(0,'ceil')|int }} КБ · Скачать</small></span>{{ icon('arrow',17) }}</a></li>
+{% set ext=(file.original_filename.rsplit('.',1)[-1] if '.' in file.original_filename else 'file')[:4]|lower %}<li><a href="{{ url_for('tasks.task_download', attachment_id=file.id) }}"><span class="file-ext" data-ext="{{ ext }}" aria-hidden="true">{{ ext|upper }}</span>{{ ui.task_symbol('attachment',19) }}<span class="file-name">{{ file.original_filename }}<small>{{ (file.size_bytes / 1024)|round(0,'ceil')|int }} КБ · Скачать</small></span>{{ icon('arrow',17) }}</a></li>
 {% endfor %}</ul>
 {%- endmacro %}
 {% macro attachments(panel=false) -%}
@@ -54,7 +54,7 @@
 {% macro history(panel=false) -%}
 <section class="card task-history"><div class="reading-history">{{ heading('История задачи', panel) }}
 <ol class="reading-history-list">{% for entry in history_entries %}
-<li><div class="history-marker" aria-hidden="true">{{ icon('history',16) }}</div><div class="history-entry"><strong>{{ entry.label }}</strong>{{ date(entry.event.created_at) }}<p class="history-actor">{{ entry.actor }}</p>
+{% set et=entry.event.event_type|default('') %}<li data-event-kind="{{ 'start' if et in ['created','task_created','sent'] else ('talk' if et in ['comment_added','attachment_added','clarification_answered'] else ('done' if et in ['completed','confirmed'] else ('stop' if et in ['cancelled','rejected'] else ('warn' if et in ['deadline_changed','returned_for_revision'] else 'other')))) }}"><div class="history-marker" aria-hidden="true">{{ icon('history',16) }}</div><div class="history-entry"><strong>{{ entry.label }}</strong>{{ date(entry.event.created_at) }}<p class="history-actor">{{ entry.actor }}</p>
 {% if entry.comment %}<p>{{ entry.comment }}</p>{% endif %}{% if entry.filename %}<p>{{ entry.filename }}</p>{% endif %}
 {% if entry.changes %}<details class="reading-changes"><summary>Что изменилось</summary><dl>{% for label, before, after in entry.changes %}<div><dt>{{ label }}</dt><dd><span>Было: {{ before if before is not none else 'Не указано' }}</span><span>Стало: {{ after if after is not none else 'Не указано' }}</span></dd></div>{% endfor %}</dl></details>{% endif %}
 </div></li>{% else %}<li><p class="reading-empty">Событий пока нет.</p></li>{% endfor %}</ol>

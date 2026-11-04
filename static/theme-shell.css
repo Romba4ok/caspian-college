@@ -1,0 +1,144 @@
+/* Caspian College — слой оформления: оболочка, вход, дашборд, учётная запись.
+   Подключается после caspian-reference.css; только оформление, без изменения разметки-контрактов. */
+
+/* ══ Контраст: белый текст на коралловых заливках ≥ 4,5:1 ═══════════════ */
+:root { --coral-fill:linear-gradient(135deg,#C9452B 0%,#B03520 100%); --coral-fill-hover:linear-gradient(135deg,#B93C24 0%,#9E2F1B 100%); --dots:radial-gradient(rgba(255,255,255,.09) 1px,transparent 1.4px); }
+.button:not(.secondary-button) { background:var(--coral-fill); }
+.button:not(.secondary-button):hover { background:var(--coral-fill-hover); }
+.login-card .button:not(.secondary-button), .portal-app .workspace-hero .button:not(.secondary-button) { background:var(--coral-fill); }
+.login-card .button:not(.secondary-button):hover, .portal-app .workspace-hero .button:not(.secondary-button):hover { background:var(--coral-fill-hover); }
+.portal-app .nav-link[aria-current=page], .portal-app .header-bell[aria-current=page] { background:var(--coral-fill); }
+.portal-app .account-avatar { background:var(--coral-fill); }
+
+/* ══ Шапка: точечный узор, подчёркивание активного пункта ═══════════════ */
+.portal-app .topbar-authenticated { background:var(--dots) 0 0/16px 16px, linear-gradient(180deg,#2E3338,#23272B); }
+.portal-app .nav-link { position:relative; }
+.portal-app .topbar a:focus-visible, .portal-app .topbar summary:focus-visible, .portal-app .topbar button:focus-visible { outline:3px solid #fff; outline-offset:2px; }
+.portal-app .account-panel a:focus-visible, .portal-app .account-panel button:focus-visible { outline:3px solid var(--c-600); }
+@media(min-width:1024px) {
+ .portal-app .nav-link::after { content:""; position:absolute; left:14px; right:14px; bottom:-10px; height:3px; border-radius:3px 3px 0 0; background:#FFB36B; transform:scaleX(0); transform-origin:left; transition:transform .35s var(--ease); }
+ .portal-app .nav-link:hover::after { transform:scaleX(.45); }
+ .portal-app .nav-link[aria-current=page]::after { transform:scaleX(1); box-shadow:0 0 12px rgba(255,179,107,.8); }
+}
+.portal-app .account-menu>summary:hover .account-avatar { box-shadow:0 0 0 3px rgba(255,255,255,.22); }
+.portal-app .account-avatar { font-size:13px; letter-spacing:.02em; box-shadow:0 0 0 2px rgba(255,255,255,.18); transition:box-shadow .25s; }
+
+/* ══ Сообщения (flash) ══════════════════════════════════════════════════ */
+.portal-app .message { position:relative; overflow:hidden; font-weight:600; animation:flash-in .5s var(--ease) both; }
+.portal-app .message::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--c-500); }
+.portal-app .message>.icon { flex:none; width:22px; height:22px; color:#B03520; }
+.portal-app .message-error { border-color:#E9C4CC; color:#8E1B2D; }
+.portal-app .message-error::before { background:var(--red); }
+.portal-app .message-error>.icon { color:#B3243A; }
+.message-text { min-width:0; overflow-wrap:anywhere; }
+@keyframes flash-in { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:none; } }
+
+/* ══ Подвал ═════════════════════════════════════════════════════════════ */
+.portal-footer { align-items:center; }
+.portal-footer>span:first-child::before { content:""; display:inline-block; width:8px; height:8px; margin-right:9px; border-radius:50%; background:var(--c-500); box-shadow:0 0 0 3px var(--c-100); }
+.portal-footer>span:last-child { font-weight:600; letter-spacing:.02em; }
+.portal-footer { color:var(--ink-2); }
+
+/* ══ Баннеры: точечный узор поверх графита ══════════════════════════════ */
+.portal-app .dash-hero, .portal-app .account-hero { background:var(--dots) 0 0/18px 18px, linear-gradient(120deg,#23272B 0%,#2E3338 55%,#3A4045 100%); }
+.portal-app .dash-hero p, .portal-app .account-hero p { color:#D3D7DB; }
+
+/* ══ Вход ═══════════════════════════════════════════════════════════════ */
+.login-orbits { position:absolute; z-index:-1; top:-9rem; left:-9rem; width:26rem; height:26rem; border-radius:50%; border:1px solid rgba(255,159,134,.24); box-shadow:0 0 0 3.5rem rgba(255,255,255,.015); pointer-events:none; }
+.login-orbits::after { content:""; position:absolute; inset:3.5rem; border-radius:50%; border:1px dashed rgba(255,255,255,.16); }
+.login-crest { box-shadow:0 30px 60px -20px rgba(0,0,0,.65),0 0 0 8px #ffffff12,0 0 70px -6px rgba(238,106,78,.5); }
+.login-intro h1 { text-wrap:balance; }
+.login-features li { backdrop-filter:blur(2px); animation:rise .6s var(--ease) both; }
+.login-features li:nth-child(1) { animation-delay:.15s; } .login-features li:nth-child(2) { animation-delay:.25s; }
+.login-features li:nth-child(3) { animation-delay:.35s; } .login-features li:nth-child(4) { animation-delay:.45s; }
+.login-features li .icon { padding:0; }
+.login-form-panel { position:relative; background:radial-gradient(60rem 30rem at 100% 0%,#FFF3EF,transparent 60%),#F6F7F8; }
+.login-card { position:relative; overflow:hidden; padding:40px 38px 32px; border:1px solid var(--line); border-radius:24px; box-shadow:var(--sh-lg); animation:rise .7s var(--ease) both; }
+.login-card::before { content:""; position:absolute; left:0; right:0; top:0; height:5px; background:linear-gradient(90deg,var(--c-600),#FFB36B 70%,transparent); }
+.login-card .login-lock { box-shadow:0 10px 22px -10px rgba(217,75,48,.55); }
+.login-card .login-help, .login-card .login-support { color:var(--ink-2); }
+.login-card .login-support { font-size:13px; }
+.login-card input:focus-visible { outline:3px solid var(--c-600); outline-offset:1px; }
+@media(min-width:768px) and (max-width:1023px) { .login-form-panel { padding:32px 16px; } .login-card { padding:30px 20px 24px; } .login-card h2 { font-size:27px; } .login-intro { padding-inline:20px; } }
+@media(max-width:520px) { .login-card { padding:30px 22px 24px; margin:24px 0; } }
+@media(min-width:768px) {
+ .login-card { max-width:480px; }
+ .login-page { background:linear-gradient(90deg,#2C3136 0 50%,#F6F7F8 50%); }
+ .login-page .portal-footer>span:last-child { color:var(--ink-2); }
+}
+
+/* ══ Дашборд ════════════════════════════════════════════════════════════ */
+/* анимация не должна держать transform после появления, иначе hover-подъём не работает */
+.dash-kpi, .dash-panel, .dash-ring-card { animation-fill-mode:backwards; }
+.dash-columns-gap .dash-panel { animation-delay:.22s; } .dash-columns-gap .dash-panel:nth-child(2) { animation-delay:.3s; }
+.dash-block { animation-delay:.2s; }
+.dash-panel { transition:transform .4s var(--ease),box-shadow .4s var(--ease),border-color .3s; }
+.dash-panel:hover { transform:translateY(-3px); box-shadow:var(--sh-md); border-color:var(--line-strong); }
+.dash-panel-head { padding-bottom:14px; border-bottom:1px solid var(--line); }
+.dash-panel-head h2 .icon { flex:none; box-sizing:border-box; width:34px; height:34px; padding:7px; border-radius:11px; color:#B03520; background:var(--c-50); border:1px solid #EE6A4E33; }
+.dash-more { padding:4px 0; }
+.dash-more:hover { text-decoration:underline; text-underline-offset:3px; }
+.dash-more:focus-visible, .dash-task a:focus-visible, .dash-notes a:focus-visible { outline:3px solid var(--c-600); outline-offset:2px; border-radius:10px; }
+.portal-app .dash-hero .dash-actions a:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+.dash-hero h1 { text-wrap:balance; }
+
+/* кольцо исполнения заполняется при загрузке (registered props; без поддержки — просто статично) */
+@property --a { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --b { syntax:'<number>'; inherits:true; initial-value:0; }
+@property --c { syntax:'<number>'; inherits:true; initial-value:0; }
+@keyframes ring-fill { from { --a:0; --b:0; --c:0; } }
+.dash-ring { animation:ring-fill 1.1s .25s var(--ease) backwards; filter:drop-shadow(0 8px 22px rgba(238,106,78,.35)); }
+.dash-ring-card { box-shadow:inset 0 1px 0 #ffffff1a; }
+
+/* плитки: первая — графитовая «итоговая», остальные с цветной нижней гранью */
+.dash-kpi { box-shadow:var(--sh-sm); }
+.dash-kpi strong { font-variant-numeric:tabular-nums; }
+.dash-kpi:first-child { background:linear-gradient(135deg,#2C3136,#3A4045); border-color:#2C3136; }
+.dash-kpi:first-child strong { color:#fff; }
+.dash-kpi:first-child span:not(.dash-kpi-icon) { color:#D3D7DB; }
+.dash-kpi:first-child .dash-kpi-icon { color:#FFB9A6; background:#ffffff14; border-color:#ffffff33; }
+.dash-kpi:first-child::after { background:linear-gradient(90deg,var(--c-500),#FFB36B); }
+.dash-kpi:first-child::before { background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(238,106,78,.28),transparent 62%); }
+.dash-kpi-late strong { color:#A51F33; }
+.dash-kpi-rework { --glow:#6E4DBA; }
+.dash-kpi-soon { --glow:#B36F0E; }
+@media(min-width:1280px) {
+ /* до 8 плиток в один ряд, плитка — столбиком */
+ .dash-kpis { grid-template-columns:repeat(auto-fit,minmax(146px,1fr)); }
+ .dash-kpi { flex-direction:column; align-items:flex-start; gap:12px; padding:18px 18px 20px; }
+ .dash-kpi strong { font-size:38px; }
+}
+
+@media(max-width:767px) { .dash-kpis .dash-kpi:last-child:nth-child(odd) { grid-column:1 / -1; } }
+.dash-task a { box-shadow:var(--sh-xs); }
+.dash-task-main strong { font-weight:700; }
+
+/* ══ Учётная запись ═════════════════════════════════════════════════════ */
+.portal-app .account-hero { align-items:center; justify-content:flex-start; gap:22px; }
+.account-hero-avatar { flex:none; display:grid; place-items:center; width:84px; height:84px; border-radius:50%; background:var(--coral-fill); color:#fff; font-size:30px; font-weight:800; letter-spacing:.02em; box-shadow:0 0 0 6px #ffffff14,0 18px 34px -12px rgba(217,75,48,.7); }
+.account-layout { display:grid; grid-template-columns:minmax(0,520px) minmax(0,420px); align-items:start; gap:24px; margin-top:24px; }
+.account-layout .account-card { max-width:none; margin:0; border-top:5px solid var(--c-600); }
+.account-tips { padding:26px 28px; background:linear-gradient(180deg,#FFF9F6,#fff 60%); }
+.account-tips h2 { display:flex; align-items:center; gap:10px; margin:0 0 16px; font-size:20px; }
+.account-tips h2 .icon { color:var(--c-600); }
+.account-tips ul { display:grid; gap:12px; margin:0; padding:0; list-style:none; }
+.account-tips li { display:flex; align-items:flex-start; gap:12px; padding:13px 15px; border:1px solid var(--line); border-radius:14px; background:#fff; color:var(--ink-2); font-size:14px; line-height:1.45; }
+.account-tips li .icon { flex:none; margin-top:1px; color:#13774F; }
+.account-card .field-leading { position:absolute; z-index:1; transform:none; inset:0 auto 0 16px; display:grid; place-items:center; width:18px; margin:0; }
+.account-card .hint { color:var(--ink-2); }
+.portal-app .account-card input:focus-visible { outline:3px solid var(--c-600); outline-offset:1px; }
+@media(max-width:1023px) {
+ .account-layout { grid-template-columns:minmax(0,1fr); }
+ .account-hero-avatar { width:64px; height:64px; font-size:24px; }
+}
+@media(max-width:640px) {
+ .portal-app .account-hero { flex-direction:row; align-items:center; }
+ .account-card, .account-tips { padding:22px 20px; }
+}
+
+/* ══ Уменьшение анимаций ════════════════════════════════════════════════ */
+@media(prefers-reduced-motion:reduce) {
+ .portal-app .message, .login-features li, .login-card, .dash-ring { animation:none !important; }
+ .portal-app .nav-link::after, .dash-panel, .dash-kpi, .account-avatar { transition:none !important; }
+ .dash-panel:hover, .dash-kpi:hover, .dash-kpi:hover .dash-kpi-icon { transform:none !important; }
+}

@@ -8,6 +8,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='caspian-palette.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='caspian-reference.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme-shell.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme-tasks.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme-admin.css') }}">
     <script src="{{ url_for('static', filename='ui.js') }}" defer></script>
   </head>
   <body class="{{ 'portal-app' if g.user else 'portal-guest' }} {% block body_class %}{% endblock %}">
@@ -47,7 +50,7 @@
           <div class="sidebar-context">{{ icon('building',18) }}<div><small>{{ 'Платформа колледжа' if user.role == 'admin' else 'Ваш отдел' }}</small><strong>{{ current_user.department.name if current_user.department else portal_roles[user.role] }}</strong></div></div>
         <a class="header-bell" href="{{ url_for('tasks.notification_center') }}"{% if endpoint.startswith('tasks.notification') %} aria-current="page"{% endif %} aria-label="Уведомления{% if unread_notification_count %}, непрочитанных: {{ unread_notification_count }}{% endif %}">{{ icon('bell',20) }}{% if unread_notification_count %}<span class="workspace-unread" aria-hidden="true">{{ unread_notification_count }}</span>{% endif %}</a>
         <details class="account-menu">
-          <summary aria-label="Учётная запись: {{ user.full_name }}"><span class="account-avatar" aria-hidden="true">{{ user.full_name[0] }}</span><span class="account-summary"><strong>{{ user.full_name }}</strong><small>{{ current_user.department.name if current_user.department else portal_roles[user.role] }}</small></span>{{ icon('chevron', 15) }}</summary>
+          <summary aria-label="Учётная запись: {{ user.full_name }}"><span class="account-avatar" aria-hidden="true">{{ (user.full_name.split()[:2]|map('first')|join|upper) or user.full_name[:1] }}</span><span class="account-summary"><strong>{{ user.full_name }}</strong><small>{{ current_user.department.name if current_user.department else portal_roles[user.role] }}</small></span>{{ icon('chevron', 15) }}</summary>
           <div class="account-panel"><strong>{{ user.full_name }}</strong><p>{{ portal_roles[user.role] }}{% if current_user.department %}<br>{{ current_user.department.name }}{% endif %}</p>
             <a class="account-link" href="{{ url_for('auth.change_password') }}">{{ icon('key', 17) }}Сменить пароль</a>
             <form action="{{ url_for('auth.logout') }}" method="post" data-ui-form><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary-button">{{ icon('logout', 17) }}Выйти</button></form>
@@ -64,7 +67,7 @@
     </div>
     {% endif %}
     <main class="container {% block main_class %}{% endblock %}" id="main" tabindex="-1">
-      {% block flash_messages %}{% with messages = get_flashed_messages(with_categories=true) %}{% for category, text in messages %}<div class="message message-{{ 'error' if category == 'error' else 'info' }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ text }}</div>{% endfor %}{% endwith %}{% endblock %}
+      {% block flash_messages %}{% with messages = get_flashed_messages(with_categories=true) %}{% for category, text in messages %}<div class="message message-{{ 'error' if category == 'error' else 'info' }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ icon('alert' if category == 'error' else 'info', 20) }}<span class="message-text">{{ text }}</span></div>{% endfor %}{% endwith %}{% endblock %}
       {% block content %}{% endblock %}
     </main>
     <footer class="portal-footer"><span>© 2026 Caspian College</span><span>Платформа отделов</span></footer>

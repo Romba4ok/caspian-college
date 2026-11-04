@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'components/icons.html' import icon %}
+{% import 'components/charts.html' as charts %}
 {% block title %}Дашборд · Платформа отделов{% endblock %}
 {% block main_class %}dashboard-workspace{% endblock %}
 {% macro task_row(task, kind) -%}
@@ -43,6 +44,10 @@
   <article class="card dash-kpi dash-kpi-work"><span class="dash-kpi-icon">{{ icon('clock',24) }}</span><div><strong>{{ data.in_progress }}</strong><span>В работе</span></div></article>
   <article class="card dash-kpi dash-kpi-late"><span class="dash-kpi-icon">{{ icon('alert',24) }}</span><div><strong>{{ data.overdue }}</strong><span>Просрочено</span></div></article>
   <article class="card dash-kpi dash-kpi-soon"><span class="dash-kpi-icon">{{ icon('flag',24) }}</span><div><strong>{{ data.soon }}</strong><span>Срок в ближайшие {{ data.soon_days }} дней</span></div></article>
+  {% if data.extra is defined and data.extra %}
+  <article class="card dash-kpi dash-kpi-new"><span class="dash-kpi-icon">{{ icon('flag',24) }}</span><div><strong>{{ data.extra.free_total }}</strong><span>Новых, ждут исполнителя</span></div></article>
+  <article class="card dash-kpi dash-kpi-rework"><span class="dash-kpi-icon">{{ icon('history',24) }}</span><div><strong>{{ data.extra.rework }}</strong><span>На доработке</span></div></article>
+  {% endif %}
   {% if data.outgoing_active is not none %}<article class="card dash-kpi"><span class="dash-kpi-icon">{{ icon('arrow',24) }}</span><div><strong>{{ data.outgoing_active }}</strong><span>Отправленных в работе</span></div></article>{% endif %}
 </div>
 
@@ -60,4 +65,52 @@
     {% else %}<p class="dash-empty">{{ icon('check',20) }}В ближайшие {{ data.soon_days }} дней сроков нет.</p>{% endif %}
   </section>
 </div>
+{% if data.extra is defined and data.extra %}{% set x = data.extra %}
+<div class="dash-columns dash-columns-gap">
+  {% if current_user.role != 'admin' %}
+  <section class="card dash-panel" aria-labelledby="dash-mine">
+    <div class="dash-panel-head"><h2 id="dash-mine">{{ icon('tasks',22) }}Мои задачи в работе</h2><span class="badge priority-normal">{{ x.mine|length }}</span></div>
+    {% if x.mine %}<ul class="dash-list">{% for task in x.mine %}{{ task_row(task,'mine') }}{% endfor %}</ul>
+    {% else %}<p class="dash-empty">{{ icon('check',20) }}На вас сейчас ничего не назначено.</p>{% endif %}
+  </section>
+  <section class="card dash-panel" aria-labelledby="dash-free">
+    <div class="dash-panel-head"><h2 id="dash-free">{{ icon('flag',22) }}Можно взять в работу</h2><span class="badge priority-high">{{ x.free_total }}</span></div>
+    {% if x.free %}<ul class="dash-list">{% for task in x.free %}{{ task_row(task,'free') }}{% endfor %}</ul>
+      {% if x.free_total > x.free|length %}<a class="dash-more" href="{{ url_for('tasks.received_tasks') }}">Все новые задачи на доске {{ icon('arrow',16) }}</a>{% endif %}
+    {% else %}<p class="dash-empty">{{ icon('check',20) }}Свободных новых задач нет.</p>{% endif %}
+  </section>
+  {% elif x.ranking %}
+  <section class="card dash-panel dash-panel-wide" aria-labelledby="dash-ranking">
+    <div class="dash-panel-head"><h2 id="dash-ranking">{{ icon('building',22) }}Нагрузка отделов</h2><a class="dash-more" href="{{ url_for('admin.admin_statistics') }}">Вся статистика {{ icon('arrow',16) }}</a></div>
+    {{ charts.ranking_rows(x.ranking) }}
+  </section>
+  {% endif %}
+</div>
+
+<section class="card dash-panel dash-panel-wide dash-block" aria-labelledby="dash-trend">
+  <div class="dash-panel-head"><h2 id="dash-trend">{{ icon('chart',22) }}Динамика за {{ x.trend.length }} дней</h2></div>
+  {{ charts.trend_chart(x.trend,'trend-dashboard') }}
+</section>
+
+<div class="dash-columns dash-columns-gap">
+  <section class="card dash-panel" aria-labelledby="dash-priority">
+    <div class="dash-panel-head"><h2 id="dash-priority">{{ icon('flag',22) }}Активные по приоритетам</h2></div>
+    {{ charts.priority_bars(x.priorities) }}
+  </section>
+  <section class="card dash-panel" aria-labelledby="dash-punctuality">
+    <div class="dash-panel-head"><h2 id="dash-punctuality">{{ icon('check',22) }}Выполнение в срок</h2></div>
+    {{ charts.punctuality_meter(x.punctuality) }}
+  </section>
+</div>
+
+<div class="dash-columns dash-columns-gap">
+  <section class="card dash-panel dash-panel-wide" aria-labelledby="dash-notes">
+    <div class="dash-panel-head"><h2 id="dash-notes">{{ icon('bell',22) }}Последние уведомления</h2>{% if x.unread %}<span class="badge task-late">{{ x.unread }} новых</span>{% endif %}</div>
+    {% if x.notifications %}<ul class="dash-notes">{% for n in x.notifications %}
+      <li class="{{ '' if n.is_read else 'is-unread' }}">{% if n.task_id %}<a href="{{ url_for('tasks.task_detail', task_id=n.task_id) }}">{{ n.text }}</a>{% else %}<span>{{ n.text }}</span>{% endif %}<small>{{ n.created_at|task_datetime('%d.%m.%Y %H:%M') }}</small></li>{% endfor %}</ul>
+    {% else %}<p class="dash-empty">{{ icon('check',20) }}Уведомлений пока нет.</p>{% endif %}
+    <a class="dash-more" href="{{ url_for('tasks.notification_center') }}">Все уведомления {{ icon('arrow',16) }}</a>
+  </section>
+</div>
+{% endif %}
 {% endblock %}

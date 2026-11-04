@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% import 'components/ui.html' as ui %}
+{% import 'components/charts.html' as charts %}
 {% from 'components/icons.html' import icon %}
 {% block title %}Общая статистика · Caspian College{% endblock %}
 {% block content %}
@@ -29,6 +30,14 @@
 </div></section>
 <div class="report-overview-grid"><section class="card report-section" aria-labelledby="global-statuses"><div class="report-section-heading"><h2 id="global-statuses">Распределение задач</h2><p>Текущие статусы по всей платформе. Каждое поручение учтено один раз.</p></div>{{ ui.report_distribution(report.overall,status_labels) }}</section>
 <section class="card report-section report-averages" aria-labelledby="global-duration"><div class="report-section-heading"><h2 id="global-duration">Среднее время выполнения</h2><p class="report-section-description">От отправки до последнего выполнения. Только задачи, которые сейчас выполнены.</p></div>{{ ui.report_average(report.overall,'По всей платформе','overall',report.overall.average_hours|report_hours) }}<p class="report-average-explainer">Возврат на доработку исключает задачу из среднего до повторного выполнения.</p></section></div>
+{% if extra is defined and extra %}
+<section class="card report-section" aria-labelledby="global-trend"><div class="report-section-heading"><h2 id="global-trend">Динамика за 30 дней</h2><p>Сколько поручений отправлено и сколько выполнено по всей платформе по дням.</p></div>{{ charts.trend_chart(extra.trend,'trend-global') }}</section>
+<div class="report-overview-grid">
+<section class="card report-section" aria-labelledby="global-priority"><div class="report-section-heading"><h2 id="global-priority">Активные по приоритетам</h2><p>Все задачи в статусах «Новая» и «В работе».</p></div>{{ charts.priority_bars(extra.priorities) }}</section>
+<section class="card report-section" aria-labelledby="global-punctuality"><div class="report-section-heading"><h2 id="global-punctuality">Выполнение в срок</h2><p>Сравнение даты выполнения со сроком у сейчас выполненных задач платформы.</p></div>{{ charts.punctuality_meter(extra.punctuality) }}</section>
+</div>
+<section class="card report-section" aria-labelledby="global-ranking"><div class="report-section-heading"><h2 id="global-ranking">Где больше всего нагрузки</h2><p>Входящие поручения отделов: сначала с наибольшим числом просрочек, затем активных задач.</p></div>{{ charts.ranking_rows(extra.ranking) }}</section>
+{% endif %}
 <section class="report-section report-department-section" aria-labelledby="department-statistics"><div class="report-section-heading"><h2 id="department-statistics">Работа отделов</h2><p>Входящие — отдел выполняет; исходящие — отдел поручает другим. Длина полос показывает количество задач в едином масштабе.</p></div>
 {% set comparison=namespace(maximum=0) %}{% for department in report.departments %}{% set comparison.maximum=[comparison.maximum,department.incoming.total,department.outgoing.total]|max %}{% endfor %}
 <div class="report-departments">{% for department in report.departments %}<article class="card report-department" data-report-department="{{ department.id }}" aria-labelledby="report-department-{{ department.id }}"><div class="report-department-heading"><h3 id="report-department-{{ department.id }}">{{ department.name }}</h3>{% if department.archived %}<span class="badge report-archive">{{ icon('history',14) }}Архивный отдел</span>{% endif %}</div>

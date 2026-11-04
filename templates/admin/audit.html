@@ -32,8 +32,8 @@
 {% if journal %}
 <div class="audit-summary"><h2>Хронология <span class="audit-total">{{ journal.total }}</span></h2><p role="status">Найдено событий: {{ journal.total }} · Страница {{ journal.page }} из {{ journal.pages }}</p></div>
 {% if journal.entries %}<ol class="audit-timeline" aria-label="События от новых к старым">
-{% for event in journal.entries %}<li class="card audit-entry" data-event-source="{{ event.source }}" data-event-id="{{ event.id }}">
-<span class="audit-feed-icon" aria-hidden="true">{{ icon('file' if event.source=='task' else 'people',21) }}</span><div class="audit-entry-body"><div class="audit-entry-heading">
+{% for event in journal.entries %}{% set kind=event.action|lower %}{% set tone='danger' if ('удал' in kind or 'отключ' in kind or 'отклон' in kind or 'отмен' in kind) else ('warn' if ('архив' in kind or 'доработк' in kind or 'срок' in kind) else ('ok' if ('создан' in kind or 'выполнен' in kind or 'восстановлен' in kind or 'возвращена в список' in kind or 'одобрен' in kind) else 'info')) %}<li class="card audit-entry" data-audit-tone="{{ tone }}" data-event-source="{{ event.source }}" data-event-id="{{ event.id }}">
+<span class="audit-feed-icon" aria-hidden="true">{{ icon('alert' if tone in ['danger','warn'] else ('check' if tone=='ok' else ('file' if event.source=='task' else 'people')),21) }}</span><div class="audit-entry-body"><div class="audit-entry-heading">
 <div class="audit-entry-meta"><span class="badge audit-source">{{ icon('file' if event.source=='task' else 'people',15) }}{{ 'Задачи' if event.source=='task' else 'Администрирование' }} · #{{ event.id }}</span><time datetime="{{ event.created_at.isoformat() }}">{{ event.created_at|task_datetime }} · Asia/Qyzylorda</time></div>
 <h3 class="audit-action">{{ event.action }}</h3>
 </div>

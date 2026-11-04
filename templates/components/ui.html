@@ -19,7 +19,7 @@
 <div class="message message-{{ kind }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ icon('alert' if kind == 'error' else 'info') }}<div>{% if title %}<strong>{{ title }}</strong>{% endif %}<p>{{ text }}</p></div></div>
 {%- endmacro %}
 {% macro empty_state(title, description) -%}
-<section class="empty-state">{{ icon('empty', 32) }}<h2>{{ title }}</h2><p>{{ description }}</p></section>
+<section class="empty-state"><span class="empty-art" aria-hidden="true"><svg viewBox="0 0 160 120" width="160" height="120" aria-hidden="true" focusable="false"><ellipse cx="80" cy="108" rx="54" ry="6" fill="var(--g-300)" opacity=".45"/><rect x="30" y="28" width="94" height="66" rx="13" fill="var(--c-100)" transform="rotate(-7 77 61)"/><rect x="36" y="22" width="94" height="66" rx="13" fill="#fff" stroke="var(--g-300)" stroke-width="2"/><rect x="50" y="38" width="38" height="7" rx="3.5" fill="var(--g-300)"/><rect x="50" y="52" width="64" height="6" rx="3" fill="var(--line)"/><rect x="50" y="64" width="46" height="6" rx="3" fill="var(--line)"/><circle cx="116" cy="82" r="17" fill="var(--c-500)"/><circle cx="114" cy="80" r="6.5" fill="none" stroke="#fff" stroke-width="2.4"/><path d="m119 85 5 5" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></span>{{ icon('empty', 32) }}<h2>{{ title }}</h2><p>{{ description }}</p></section>
 {%- endmacro %}
 {% macro pagination(page, pages, previous_url=none, next_url=none) -%}
 {% if pages > 1 %}<nav class="pagination" aria-label="Страницы">{{ link_button('Назад', previous_url) }}<span>Страница {{ page }} из {{ pages }}</span>{{ link_button('Далее', next_url) }}</nav>{% endif %}
@@ -31,9 +31,9 @@
 <section class="card people-directory"><div class="people-directory-heading"><h2>{{ 'Сотрудники отдела' if staff else 'Все пользователи' }}</h2><span class="hint">Учётные записи: {{ people|length }}</span></div>
 {% if people %}<table class="people-table"><caption class="sr-only">{{ 'Сотрудники своего отдела' if staff else 'Пользователи платформы' }}</caption><thead><tr><th scope="col">Имя и логин</th>{% if not staff %}<th scope="col">Роль</th><th scope="col">Отдел</th>{% endif %}<th scope="col">Доступ</th>{% if staff %}<th scope="col">Активные задачи</th>{% endif %}<th scope="col">Действия</th></tr></thead><tbody>
 {% for person in people %}<tr data-account-id="{{ person.id }}">
-<td data-label="Имя и логин"><div class="person-identity"><span class="person-avatar" aria-hidden="true">{{ person.full_name[0] }}</span><div><strong>{{ person.full_name }}</strong><span class="person-login">{{ person.username }}</span></div></div></td>
-{% if not staff %}<td data-label="Роль">{{ roles[person.role] }}</td><td data-label="Отдел">{{ person.department.name if person.department else 'Не назначается' }}</td>{% endif %}
-<td data-label="Доступ"><span class="badge account-{{ 'disabled' if person.is_blocked else 'enabled' }}">{{ icon('lock' if person.is_blocked else 'check',14) }}{{ 'Отключён' if person.is_blocked else 'Активен' }}</span></td>
+<td data-label="Имя и логин"><div class="person-identity"><span class="person-avatar avatar-tone-{{ person.id % 6 }}" aria-hidden="true">{{ person.full_name[0] }}</span><div><strong>{{ person.full_name }}</strong><span class="person-login">{{ person.username }}</span></div></div></td>
+{% if not staff %}<td data-label="Роль"><span class="role-pill role-pill-{{ person.role }}">{{ roles[person.role] }}</span></td><td data-label="Отдел">{% if person.department %}<span class="person-dept">{{ icon('building',15) }}<span>{{ person.department.name }}</span></span>{% else %}<span class="person-dept person-dept-none">Не назначается</span>{% endif %}</td>{% endif %}
+<td data-label="Доступ"><span class="badge account-{{ 'disabled' if person.is_blocked else 'enabled' }}">{{ icon('lock' if person.is_blocked else 'check',14) }}{{ 'Отключён' if person.is_blocked else 'Активен' }}</span>{% if deleted %} <span class="badge account-deleted">{{ icon('history',14) }}Удалён</span>{% endif %}</td>
 {% if staff %}<td data-label="Активные задачи"><strong>{{ active_assignments.get(person.id,0) }}</strong></td>{% endif %}
 <td data-label="Действия"><div class="person-actions">{% if deleted %}<form method="post" data-ui-form data-confirm-title="Вернуть пользователя в список?" data-confirm-label="Вернуть в список" data-confirm-message="{{ person.full_name }}. Учётная запись появится в общем списке. Доступ останется отключённым до отдельного включения." action="{{ url_for('admin.admin_user_restore',user_id=person.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="button secondary-button" data-submit-button><span data-button-label>Вернуть в список</span><span class="sr-only">: {{ person.full_name }}</span></button></form>{% else %}<a class="button secondary-button" href="{{ url_for('staff.staff_edit' if staff else 'admin.admin_user_edit',user_id=person.id) }}">Изменить<span class="sr-only">: {{ person.full_name }}</span></a>
 {% if person.role=='admin' %}<span class="hint">Единственный администратор</span>
@@ -105,10 +105,15 @@
 {%- endmacro %}
 
 {% macro task_assignees(task) -%}
-{% for person in task.assignees %}<span class="task-assignee-name">{{ person.full_name ~ (' (недоступен)' if not person.is_active or person.role not in ['head','employee'] or person.department_id != task.recipient_department_id else '') }}</span>{% if not loop.last %}; {% endif %}{% else %}Не назначен{% endfor %}
+<span class="task-assignees">{% for person in task.assignees %}<span class="task-assignee"><span class="assignee-avatar" aria-hidden="true">{{ person.full_name[:1]|upper }}</span><span class="task-assignee-name">{{ person.full_name ~ (' (недоступен)' if not person.is_active or person.role not in ['head','employee'] or person.department_id != task.recipient_department_id else '') }}</span></span>{% if not loop.last %}<span class="assignee-sep">; </span>{% endif %}{% else %}Не назначен{% endfor %}</span>
 {%- endmacro %}
-{% macro task_process(task) -%}
+{% macro task_process(task, stepper=false) -%}
 {% if 'task_progress' is filter %}{% set progress = task|task_progress %}<div class="task-process-copy"><p class="task-relationship hint">{{ progress.relationship }}</p><p class="task-stage hint">{{ progress.stage }}</p></div>{% endif %}
+{% if stepper %}{% set rank = {'new':0,'in_progress':1,'completed':2}.get(task.status, -1) %}{% set closed = task.status in ['cancelled','rejected'] %}
+<ol class="task-stepper{% if closed %} task-stepper-closed{% endif %}" aria-label="Этапы процесса">
+{% for label in ['Новая','В работе','Выполнено'] %}<li class="task-step {{ 'is-done' if (rank > loop.index0 or (rank == 2 and loop.index0 == 2)) else ('is-current' if rank == loop.index0 else 'is-todo') }}"{% if rank == loop.index0 and rank < 2 %} aria-current="step"{% endif %}><span class="task-step-dot" aria-hidden="true">{% if rank > loop.index0 or (rank == 2 and loop.index0 == 2) %}{{ icon('check', 14) }}{% else %}{{ loop.index }}{% endif %}</span><span class="task-step-label">{{ label }}<span class="sr-only">{{ ' — пройден' if (rank > loop.index0 or (rank == 2 and loop.index0 == 2)) else (' — текущий этап' if rank == loop.index0 else ' — впереди') }}</span></span></li>{% endfor %}
+{% if closed %}<li class="task-step is-closed is-current" aria-current="step"><span class="task-step-dot" aria-hidden="true">{{ icon('alert', 14) }}</span><span class="task-step-label">{{ 'Отменена' if task.status == 'cancelled' else 'Отклонена' }}<span class="sr-only"> — задача закрыта</span></span></li>{% endif %}
+</ol>{% endif %}
 {%- endmacro %}
 
 {% macro task_summary(task, clock, card, direction, user, attention=none, layout='board', detail_url=none, stats=none, unavailable=false) -%}
@@ -117,7 +122,7 @@
 {% set closed_date = task.completed_at if task.status == 'completed' else task.closed_at %}
 {% set url = card.detail_url if card else detail_url %}
 {% set url = url ~ ('&' if '?' in url else '?') ~ 'origin_section=' ~ (direction|urlencode) ~ '&origin_view=' ~ (layout|urlencode) ~ '&origin_scope=' ~ (request.args.get('scope','received')|urlencode) ~ '&origin_page=' ~ (request.args.get('page','1')|urlencode) %}
-<article class="{{ 'board-card' if layout == 'board' else 'card task-card' }}{% if overdue %} task-card-overdue{% endif %}" data-task-id="{{ task.id }}"{% if layout == 'board' %} data-board-task="{{ card|tojson|forceescape }}"{% endif %}>
+<article class="{{ 'board-card' if layout == 'board' else 'card task-card' }}{% if overdue %} task-card-overdue{% endif %} task-tone-{{ task.status }} task-pri-{{ task.priority }}" data-task-id="{{ task.id }}"{% if layout == 'board' %} data-board-task="{{ card|tojson|forceescape }}"{% endif %}>
   <div class="card-reference"><a class="task-number" href="{{ card.detail_url if card else detail_url }}" aria-label="Постоянная ссылка на задачу №{{ task.id }}">№{{ task.id }}</a><span class="card-priority"><span class="sr-only">Приоритет: </span>{{ priority_badge(task.priority) }}</span></div>
   <div class="card-heading">
   {% if layout == 'board' %}<h4 class="task-card-title"><a href="{{ url }}">{{ task.title }}</a></h4>{% else %}<h2 class="task-card-title"><a href="{{ url }}">{{ task.title }}</a></h2><p class="task-card-summary">{{ task.description }}</p>{% endif %}

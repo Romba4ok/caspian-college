@@ -1,0 +1,90 @@
+{# Графики без библиотек: SVG и CSS-полосы. Данные приходят из app/analytics.py. #}
+{% set PRIORITY_NAMES = {'urgent':'Срочный','high':'Высокий','normal':'Обычный','low':'Низкий'} %}
+
+{% macro trend_chart(t, id) -%}
+{% set width = 640 %}{% set left = 30 %}{% set top = 12 %}{% set plot = 160 %}
+{% set n = t.days|length %}{% set slot = (width - left) / n %}{% set bar = [slot * 0.38, 14]|min %}
+{% set step = 1 if n <= 14 else 5 %}
+<figure class="chart-trend{{ ' chart-trend-empty' if not (t.sent_total or t.completed_total) }}" id="{{ id }}">
+  <ul class="chart-legend">
+    <li><i class="chart-key chart-key-sent" aria-hidden="true"></i>Поступило: <strong>{{ t.sent_total }}</strong></li>
+    <li><i class="chart-key chart-key-done" aria-hidden="true"></i>Выполнено: <strong>{{ t.completed_total }}</strong></li>
+  </ul>
+  <div class="chart-scroll" tabindex="0" role="region" aria-label="График по дням: на узком экране прокручивается по горизонтали">
+  <svg viewBox="0 0 {{ width }} 205" role="img" aria-labelledby="{{ id }}-title">
+    <title id="{{ id }}-title">Поступившие и выполненные задачи по дням за {{ n }} дней: поступило {{ t.sent_total }}, выполнено {{ t.completed_total }}</title>
+    {% for fraction in (0, 1) %}{% set y = top + plot * (1 - fraction) %}
+    <line class="chart-grid" x1="{{ left }}" x2="{{ width }}" y1="{{ y }}" y2="{{ y }}"/>
+    <text class="chart-axis" x="{{ left - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ t.maximum if fraction else 0 }}</text>
+    {% endfor %}
+    {% for d in t.days %}{% set x = left + loop.index0 * slot + (slot - 2 * bar - 2) / 2 %}
+    {% set hs = d.sent / t.maximum * plot %}{% set hc = d.completed / t.maximum * plot %}
+    {% if d.sent %}<rect class="chart-bar-sent" x="{{ '%.1f'|format(x) }}" y="{{ '%.1f'|format(top + plot - hs) }}" width="{{ '%.1f'|format(bar) }}" height="{{ '%.1f'|format(hs) }}" rx="2"><title>{{ d.day.strftime('%d.%m.%Y') }}: поступило {{ d.sent }}</title></rect>{% endif %}
+    {% if d.completed %}<rect class="chart-bar-done" x="{{ '%.1f'|format(x + bar + 2) }}" y="{{ '%.1f'|format(top + plot - hc) }}" width="{{ '%.1f'|format(bar) }}" height="{{ '%.1f'|format(hc) }}" rx="2"><title>{{ d.day.strftime('%d.%m.%Y') }}: выполнено {{ d.completed }}</title></rect>{% endif %}
+    {% if loop.index0 % step == 0 or loop.last %}<text class="chart-axis" x="{{ '%.1f'|format(x + 2 * bar + 2 if loop.last else x + bar + 1) }}" y="{{ top + plot + 18 }}" text-anchor="{{ 'end' if loop.last else 'middle' }}">{{ d.day.strftime('%d.%m') }}</text>{% endif %}
+    {% endfor %}
+  </svg>
+  </div>
+  <details class="chart-data"><summary>Цифры по дням</summary>
+    <div class="report-table-wrap"><table class="report-table"><caption>Поступившие и выполненные задачи по дням</caption><thead><tr><th scope="col">День</th><th scope="col">Поступило</th><th scope="col">Выполнено</th></tr></thead><tbody>
+    {% for d in t.days|reverse %}<tr><th scope="row">{{ d.day.strftime('%d.%m.%Y') }}</th><td>{{ d.sent }}</td><td>{{ d.completed }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </details>
+</figure>
+{%- endmacro %}
+
+{% macro priority_bars(p) -%}
+<ul class="chart-bars" aria-label="Активные задачи по приоритетам">
+{% for key, label in PRIORITY_NAMES.items() %}{% set count = p.counts[key] %}
+  <li class="chart-bar-row prio-{{ key }}"><span class="chart-bar-label">{{ label }}</span><span class="chart-bar-track" aria-hidden="true"><span class="chart-bar-fill" style="--size:{{ (count / p.total * 100)|round(2) if p.total else 0 }}%"></span></span><strong>{{ count }}</strong></li>
+{% endfor %}
+</ul>
+{% if not p.total %}<p class="chart-empty">Активных задач нет.</p>{% endif %}
+{%- endmacro %}
+
+{% macro punctuality_meter(p) -%}
+{% if p.total %}
+<div class="chart-meter" role="img" aria-label="В срок выполнено {{ p.percent }}% задач: {{ p.on_time }} из {{ p.total }}">
+  <div class="chart-meter-value"><strong>{{ p.percent }}%</strong><span>выполнено в срок</span></div>
+  <div class="chart-meter-track" aria-hidden="true"><span class="chart-meter-ok" style="--size:{{ p.on_time / p.total * 100 }}%"></span><span class="chart-meter-late" style="--size:{{ p.late / p.total * 100 }}%"></span></div>
+  <p class="chart-meter-note"><span><i class="chart-key chart-key-done" aria-hidden="true"></i>В срок: <strong>{{ p.on_time }}</strong></span><span><i class="chart-key chart-key-late" aria-hidden="true"></i>После срока: <strong>{{ p.late }}</strong></span></p>
+</div>
+{% else %}<p class="chart-empty">Нет данных: ещё нет выполненных задач.</p>{% endif %}
+{%- endmacro %}
+
+{% macro workload_rows(w) -%}
+{% if w.rows %}
+<ul class="chart-people">
+{% for r in w.rows %}
+  <li class="chart-person"><div class="chart-person-name"><strong>{{ r.name }}</strong><small>{{ 'Начальник' if r.role == 'head' else 'Сотрудник' }}</small></div>
+    <div class="chart-stack" aria-hidden="true"><span class="chart-stack-active" style="--size:{{ r.active / w.maximum * 100 }}%"></span><span class="chart-stack-done" style="--size:{{ r.completed / w.maximum * 100 }}%"></span></div>
+    <dl class="chart-person-figures"><div><dt>В работе</dt><dd>{{ r.active }}</dd></div><div class="{{ 'is-late' if r.overdue }}"><dt>Просрочено</dt><dd>{{ r.overdue }}</dd></div><div><dt>Выполнено</dt><dd>{{ r.completed }}</dd></div></dl></li>
+{% endfor %}
+</ul>
+<p class="chart-note">Задачу с несколькими исполнителями видит каждый из них. Новых задач без исполнителя: <strong>{{ w.free }}</strong>.</p>
+{% else %}<p class="chart-empty">В отделе нет действующих сотрудников.</p>{% endif %}
+{%- endmacro %}
+
+{% macro counterpart_rows(c) -%}
+{% if c.rows %}
+<ul class="chart-pairs">
+{% for r in c.rows %}
+  <li><strong class="chart-pair-name">{{ r.name }}</strong>
+    <span class="chart-pair-line"><span class="chart-pair-label">Получено</span><span class="chart-bar-track" aria-hidden="true"><span class="chart-bar-fill chart-fill-in" style="--size:{{ r.incoming / c.maximum * 100 }}%"></span></span><b>{{ r.incoming }}</b></span>
+    <span class="chart-pair-line"><span class="chart-pair-label">Отправлено</span><span class="chart-bar-track" aria-hidden="true"><span class="chart-bar-fill chart-fill-out" style="--size:{{ r.outgoing / c.maximum * 100 }}%"></span></span><b>{{ r.outgoing }}</b></span></li>
+{% endfor %}
+</ul>
+{% else %}<p class="chart-empty">Обмена поручениями с другими отделами пока не было.</p>{% endif %}
+{%- endmacro %}
+
+{% macro ranking_rows(r, link=none) -%}
+{% if r.rows %}
+<ul class="chart-people">
+{% for d in r.rows %}
+  <li class="chart-person"><div class="chart-person-name"><strong>{{ d.name }}</strong>{% if d.archived %}<small>Архивный отдел</small>{% endif %}</div>
+    <div class="chart-stack" aria-hidden="true"><span class="chart-stack-active" style="--size:{{ d.active / r.maximum * 100 }}%"></span><span class="chart-stack-done" style="--size:{{ d.completed / r.maximum * 100 }}%"></span></div>
+    <dl class="chart-person-figures"><div><dt>Активные</dt><dd>{{ d.active }}</dd></div><div class="{{ 'is-late' if d.overdue }}"><dt>Просрочено</dt><dd>{{ d.overdue }}</dd></div><div><dt>Выполнено</dt><dd>{{ d.completed }}</dd></div></dl></li>
+{% endfor %}
+</ul>
+{% else %}<p class="chart-empty">Входящих поручений пока нет.</p>{% endif %}
+{%- endmacro %}

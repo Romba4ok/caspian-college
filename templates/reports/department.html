@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% import 'components/ui.html' as ui %}
+{% import 'components/charts.html' as charts %}
 {% from 'components/icons.html' import icon %}
 {% block title %}Отчёт отдела · Caspian College{% endblock %}
 {% block content %}
@@ -18,6 +19,15 @@
 <section class="card report-section" aria-labelledby="report-statuses"><div class="report-section-heading"><h2 id="report-statuses">Распределение задач</h2><p>Текущий статус каждого поручения отдела.</p></div>{{ ui.report_distribution(report.overall,status_labels) }}</section>
 <section class="card report-section report-direction-comparison" aria-labelledby="report-directions"><div class="report-section-heading"><h2 id="report-directions">Входящие и исходящие</h2><p>Две стороны работы вашего отдела.</p></div>{% set direction_max = [report.incoming.total,report.outgoing.total]|max %}{{ ui.report_direction(report.incoming,'Входящие','Поручения, которые получил ваш отдел',direction_max,'incoming') }}{{ ui.report_direction(report.outgoing,'Исходящие','Поручения, отправленные другим отделам',direction_max,'outgoing') }}</section>
 </div>
+{% if extra is defined and extra %}
+<section class="card report-section" aria-labelledby="report-trend"><div class="report-section-heading"><h2 id="report-trend">Динамика за 30 дней</h2><p>Сколько поручений поступило в отдел и сколько выполнено по дням (по датам отправки и выполнения).</p></div>{{ charts.trend_chart(extra.trend,'trend-department') }}</section>
+<div class="report-overview-grid">
+<section class="card report-section" aria-labelledby="report-priority"><div class="report-section-heading"><h2 id="report-priority">Активные по приоритетам</h2><p>Входящие задачи в статусах «Новая» и «В работе».</p></div>{{ charts.priority_bars(extra.priorities) }}</section>
+<section class="card report-section" aria-labelledby="report-punctuality"><div class="report-section-heading"><h2 id="report-punctuality">Выполнение в срок</h2><p>Сравнение даты выполнения со сроком у сейчас выполненных входящих задач.</p></div>{{ charts.punctuality_meter(extra.punctuality) }}</section>
+</div>
+<section class="card report-section" aria-labelledby="report-workload"><div class="report-section-heading"><h2 id="report-workload">Нагрузка сотрудников</h2><p>Активные и выполненные входящие задачи каждого участника отдела.</p></div>{{ charts.workload_rows(extra.workload) }}</section>
+<section class="card report-section" aria-labelledby="report-partners"><div class="report-section-heading"><h2 id="report-partners">С какими отделами работаем</h2><p>Сколько поручений получено от каждого отдела и сколько ему отправлено.</p></div>{{ charts.counterpart_rows(extra.counterparts) }}</section>
+{% endif %}
 <section class="card report-section report-averages report-averages-full" aria-labelledby="report-duration"><div class="report-section-heading"><h2 id="report-duration">Сколько времени занимает выполнение?</h2><p class="report-section-description">Среднее время выполнения — от отправки до последнего выполнения. Считаем только задачи, которые сейчас выполнены.</p></div>{{ ui.report_average(report.overall,'По отделу','overall',report.overall.average_hours|report_hours) }}<div class="report-direction-averages">{{ ui.report_average(report.incoming,'Входящие','incoming',report.incoming.average_hours|report_hours) }}{{ ui.report_average(report.outgoing,'Исходящие','outgoing',report.outgoing.average_hours|report_hours) }}</div></section>
 <details class="card report-detail-figures"><summary>Подробные цифры по направлениям</summary>{{ ui.report_status_table(report.incoming,report.outgoing,status_labels,'Количество поручений по направлениям') }}</details>
 {{ ui.report_method() }}

@@ -92,6 +92,21 @@ def department_report(actor, *, department_id=None, now=None):
         outgoing=_metrics(and_(visible, Task.sender_department_id == actor.department_id), moment))
 
 
+def department_extras(actor, *, now=None):
+    """Графики отчёта начальника: только входящие поручения его отдела."""
+    from . import analytics
+    moment = _moment(now)
+    incoming = and_(task_visibility_clause(actor), dispatched_clause(), Task.recipient_department_id == actor.department_id)
+    return dict(analytics.extras_for_scope(incoming, moment), workload=analytics.workload(actor.department_id, moment),
+        counterparts=analytics.counterparts(actor.department_id))
+
+
+def global_extras(*, now=None):
+    from . import analytics
+    moment = _moment(now)
+    return dict(analytics.extras_for_scope(true(), moment), ranking=analytics.department_ranking(moment))
+
+
 @reports_bp.app_template_filter("report_hours")
 def report_hours(value):
     return "Нет данных" if value is None else f"{value:.2f}".replace(".", ",") + " ч"
@@ -111,7 +126,8 @@ def own_department_report():
         report = department_report(current_user, department_id=int(raw[0]) if raw else None)
     except PermissionError:
         abort(403)
-    return render_template("reports/department.html", report=report, status_labels=report_status_labels())
+    return render_template("reports/department.html", report=report, status_labels=report_status_labels(),
+        extra=department_extras(current_user, now=report["generated_at"]))
 
 
 def report_status_labels():

@@ -291,12 +291,13 @@ def admin_settings():
 @admin_bp.route("/admin/statistics")
 @admin_required
 def admin_statistics():
-    from .reporting import global_statistics, report_status_labels
+    from .reporting import global_extras, global_statistics, report_status_labels
     try:
         report = global_statistics(current_user)
     except PermissionError:
         abort(403)
-    return render_template("admin/statistics.html", report=report, status_labels=report_status_labels())
+    return render_template("admin/statistics.html", report=report, status_labels=report_status_labels(),
+        extra=global_extras(now=report["generated_at"]))
 
 
 @admin_bp.route("/admin/audit")
